@@ -7,10 +7,20 @@ import { api, FIELD_LABELS, fmtDate, fmtRoyalty, type Alternative, type QueueRow
 
 type Decision = { action: ReviewAction; value: string | null };
 
-function decisionText(d: Decision): string {
+const BOOL_FIELDS = new Set(["pugh_clause"]);
+
+// The same rule the extractor is given (landrisk/fields.py), so labels and model agree on terms.
+const FIELD_HELP: Record<string, string> = {
+  pugh_clause:
+    "Yes only if the lease itself ends, after the primary term, as to acreage or depths that aren't producing " +
+    "or in a pooled unit. No if there's no such clause. A voluntary release clause (\"Lessee may at any time… " +
+    "deliver a release\") and a shut-in clause are not Pugh clauses.",
+};
+
+function decisionText(d: Decision, field: string): string {
   if (d.action === "accept") return "Accepted";
   if (d.action === "absent" || d.value == null) return "Marked not in lease";
-  return `Corrected to ${d.value}`;
+  return `Labeled ${displayValue(field, d.value)}`;
 }
 
 // A decision already saved for this field (label mode loads these with the fields).
@@ -40,8 +50,37 @@ function displayValue(field: string, raw: Alternative["value"] | string | null |
 
 const display = (row: QueueRow) => displayValue(row.field_name, row.extracted_value);
 
-function FieldCard({ row, decision, onDecide, labeling }: {
-  row: QueueRow; decision?: Decision; onDecide: (d: Decision) => Promise<void>; labeling: boolean;
+// Blind labeling: record your own answer before seeing the model's, so the
+// labels measure the model instead of agreeing with it.
+function BlindForm({ row, label, busy, decide, onCancel }: {
+  row: QueueRow; label: string; busy: boolean; decide: (d: Decision) => Promise<void>; onCancel?: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const id = `b-${row.document_id}-${row.field_name}`;
+  const absent = <button type="button" onClick={() => decide({ action: "absent", value: null })} disabled={busy}>Not in lease</button>;
+  const cancel = onCancel && <button type="button" onClick={onCancel} disabled={busy}>Cancel</button>;
+  if (BOOL_FIELDS.has(row.field_name)) {
+    return (
+      <div className="row">
+        <button className="primary" onClick={() => decide({ action: "correct", value: "true" })} disabled={busy}>Yes</button>
+        <button className="primary" onClick={() => decide({ action: "correct", value: "false" })} disabled={busy}>No</button>
+        {cancel}
+      </div>
+    );
+  }
+  return (
+    <form className="row" onSubmit={(e) => { e.preventDefault(); if (value.trim()) decide({ action: "correct", value }); }}>
+      <label className="visually-hidden" htmlFor={id}>{label}</label>
+      <input id={id} type="text" value={value} onChange={(e) => setValue(e.target.value)}
+             placeholder={row.field_name === "royalty_rate" ? "e.g. 1/4 or 0.25" : "Value from the lease"} />
+      <button type="submit" className="primary" disabled={busy || !value.trim()}>Save</button>
+      {absent}{cancel}
+    </form>
+  );
+}
+
+function FieldCard({ row, decision, onDecide, labeling, blind }: {
+  row: QueueRow; decision?: Decision; onDecide: (d: Decision) => Promise<void>; labeling: boolean; blind: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(row.extracted_value ?? "");
@@ -56,10 +95,24 @@ function FieldCard({ row, decision, onDecide, labeling }: {
     finally { setBusy(false); }
   };
 
+  if (blind && (!decision || editing)) {
+    return (
+      <div className="field-card">
+        <div className="small muted">{label}</div>
+        {FIELD_HELP[row.field_name] && <div className="note muted">{FIELD_HELP[row.field_name]}</div>}
+        <BlindForm row={row} label={label} busy={busy} decide={decide}
+                   onCancel={decision ? () => setEditing(false) : undefined} />
+        {error && <div className="note" role="alert" style={{ color: "var(--high)" }}>{error}</div>}
+      </div>
+    );
+  }
+
   return (
     <div className="field-card">
+      {blind && <div className="small muted">Model&apos;s answer, shown after you decided:</div>}
       <div className="small muted">{label}, {Math.round(row.confidence * 100)}% confidence</div>
       <div className="value">{display(row)}</div>
+      {labeling && FIELD_HELP[row.field_name] && <div className="note muted">{FIELD_HELP[row.field_name]}</div>}
       {row.validation_notes && <div className="note">{row.validation_notes}</div>}
       {row.alternatives?.length ? (
         <div className="alternatives">
@@ -91,7 +144,7 @@ function FieldCard({ row, decision, onDecide, labeling }: {
       )}
       {decision ? (
         <div className="row">
-          <span className="done">{decisionText(decision)}</span>
+          <span className="done">{decisionText(decision, row.field_name)}</span>
           <button className="chip" onClick={() => setEditing(true)} disabled={busy}>Change</button>
         </div>
       ) : null}
@@ -123,6 +176,13 @@ function FieldCard({ row, decision, onDecide, labeling }: {
 function ReviewQueue() {
   const params = useSearchParams();
   const labeling = params.get("mode") === "label";
+  const blind = labeling && params.get("blind") === "1";
+  const onlyField = labeling ? params.get("field") : null;
+  const href = (changes: Record<string, string | null>) => {
+    const next = new URLSearchParams(params.toString());
+    for (const [k, v] of Object.entries(changes)) if (v == null) next.delete(k); else next.set(k, v);
+    return `/review?${next.toString()}`;
+  };
   const [queue, setQueue] = useState<QueueRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(params.get("doc"));
@@ -132,7 +192,8 @@ function ReviewQueue() {
 
   const load = useCallback(() => {
     (labeling ? api.labelFields() : api.queue())
-      .then((q) => {
+      .then((all) => {
+        const q = onlyField ? all.filter((r) => r.field_name === onlyField) : all;
         setQueue(q);
         const saved: Record<string, Decision> = {};
         for (const r of q) {
@@ -142,7 +203,7 @@ function ReviewQueue() {
         setDecisions(saved);
       })
       .catch((e: Error) => setError(e.message));
-  }, [labeling]);
+  }, [labeling, onlyField]);
   useEffect(load, [load]);
 
   const docs = useMemo(() => {
@@ -173,6 +234,12 @@ function ReviewQueue() {
       <nav className="mode-toggle" aria-label="Review mode">
         <Link aria-current={labeling ? undefined : "page"} href="/review">Needs review</Link>
         <Link aria-current={labeling ? "page" : undefined} href="/review?mode=label">Label all fields</Link>
+        {labeling && (
+          <Link aria-current={blind ? "page" : undefined} href={href({ blind: blind ? null : "1" })}>
+            {blind ? "Model answers hidden" : "Hide model answers"}
+          </Link>
+        )}
+        {onlyField && <Link href={href({ field: null })}>Only {FIELD_LABELS[onlyField] ?? onlyField} ✕</Link>}
       </nav>
       <div className="page-head">
         {labeling ? (
@@ -228,6 +295,7 @@ function ReviewQueue() {
                 key={key(r)}
                 row={r}
                 labeling={labeling}
+                blind={blind}
                 decision={decisions[key(r)]}
                 onDecide={async (d) => {
                   const res = await api.review({

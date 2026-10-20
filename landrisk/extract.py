@@ -235,6 +235,11 @@ def normalize(kind: str, value) -> tuple[str | None, str | None]:
     return s, None
 
 
+# Sentences near the word royalty that state some other rate: interest on late
+# payments, or an overriding royalty carved out of the working interest.
+_NOT_LESSOR_ROYALTY = re.compile(r"overriding royalty|bears? interest|interest at|per annum", re.I)
+
+
 def _royalty_rates_in(text: str) -> dict[float, str]:
     """Each royalty rate the document states, with the first sentence stating it."""
     rates: dict[float, str] = {}
@@ -243,10 +248,11 @@ def _royalty_rates_in(text: str) -> dict[float, str]:
     for i, sentence in enumerate(sentences):
         # A heading like "4. Royalties." splits off from the sentence that states the rate.
         context = (sentences[i - 1] if i else "") + " " + sentence
-        if "royalt" not in context.lower():
+        if "royalt" not in context.lower() or _NOT_LESSOR_ROYALTY.search(sentence):
             continue
         found = [round(int(a) / int(b), 4) for a, b in _FRACTION.findall(sentence) if int(b) in (4, 5, 6, 8, 16, 32)]
         found += [round(float(p) / 100, 4) for p in _PERCENT.findall(sentence)]
+        found = [r for r in found if 0 < r <= 0.5]  # no lessor royalty is over half; 8/8ths is "all"
         quote = re.sub(r"\s+", " ", sentence).strip()[:300]
         for rate in found:
             # Prefer a sentence that states this rate alone over one comparing two rates.
