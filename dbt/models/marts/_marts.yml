@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: leases
+    description: >
+      One row per lease document with resolved, typed fields. Tests on
+      extracted values warn instead of failing: a bad extraction should show
+      up in the review queue, not block the risk models downstream.
+    columns:
+      - name: document_id
+        data_tests: [not_null, unique]
+      - name: tract_id
+        data_tests:
+          - not_null: {config: {severity: warn}}
+          - unique: {config: {severity: warn}}
+      - name: royalty_rate
+        description: Warn rather than fail, so a bad extraction surfaces without blocking the build.
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0.125, max_value: 0.30}
+              config: {severity: warn}
+      - name: primary_term_end
+        data_tests:
+          - not_null: {config: {severity: warn}}
+      - name: extraction_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [needs_review, reviewed, auto_accepted]
+
+  - name: lease_production_monthly
+    description: Monthly production attributed to each lease through its tract's RRC leases.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [document_id, production_month]
+
+  - name: lease_risk
+    description: Risk flags, severity, next deadline and recommended action per lease.
+    columns:
+      - name: document_id
+        data_tests: [not_null, unique]
+      - name: severity
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [high, medium, low, none]
+
+  - name: review_queue
+    description: Extracted fields below the confidence threshold with no human decision yet.

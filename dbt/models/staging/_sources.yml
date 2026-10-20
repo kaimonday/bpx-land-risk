@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: Tables written by the Python pipeline (cli.py) and the API.
+    tables:
+      - name: rrc_operators
+        description: RRC operators whose names matched RRC_OPERATOR_PATTERN at ingest.
+      - name: rrc_lease_cycle
+        description: >
+          Monthly production per RRC (regulatory) lease from the PDQ dump
+          OG_LEASE_CYCLE table, filtered to the matched operators. All columns
+          are raw strings, as in the dump.
+      - name: rrc_well_completion
+        description: Wells on those RRC leases (PDQ OG_WELL_COMPLETION).
+      - name: tract_rrc_xref
+        description: Land-system mapping of tracts to the RRC leases they feed, with allocation share.
+      - name: lease_documents
+        description: One row per lease PDF that has been processed.
+      - name: lease_extraction_fields
+        description: One row per field per extraction run (long form).
+      - name: lease_reviews
+        description: Human accept/correct decisions from the review queue.
+      - name: lease_ground_truth
+        description: Answer key for synthetic documents; used only by the evaluator.

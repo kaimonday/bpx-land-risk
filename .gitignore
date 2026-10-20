@@ -1,0 +1,34 @@
+# Secrets: never commit these
+.env
+.env.*
+!.env.example
+
+# Local data (RRC data is public but large; don't re-host it)
+data/*
+!data/.gitkeep
+*.duckdb
+*.duckdb.wal
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+logs/
+
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

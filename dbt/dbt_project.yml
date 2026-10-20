@@ -1,0 +1,41 @@
+name: landrisk
+version: "1.0.0"
+config-version: 2
+profile: landrisk
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target"]
+
+vars:
+  as_of_date: "2026-10-20"          # overridden at runtime with today's date
+  review_threshold: 0.85            # fields below this go to the review queue
+  hbp_gap_months: 3                 # months without production before an HBP lease is flagged
+  expiring_window_days: 180         # how far ahead to warn on undeveloped primary terms
+  shut_in_warning_days: 60          # warn this many days before a shut-in payment is due
+  lease_fields:
+    - {name: lessor, kind: text}
+    - {name: lessee, kind: text}
+    - {name: effective_date, kind: date}
+    - {name: primary_term_months, kind: int}
+    - {name: royalty_rate, kind: decimal}
+    - {name: county, kind: text}
+    - {name: state, kind: text}
+    - {name: tract_id, kind: text}
+    - {name: gross_acres, kind: decimal}
+    - {name: depth_limit_ft, kind: int}
+    - {name: pugh_clause, kind: bool}
+    - {name: shut_in_payment_per_acre, kind: decimal}
+    - {name: shut_in_grace_days, kind: int}
+    - {name: continuous_drilling_days, kind: int}
+
+models:
+  landrisk:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table

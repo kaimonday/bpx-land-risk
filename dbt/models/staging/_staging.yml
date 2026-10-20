@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: stg_rrc__production_monthly
+    description: Monthly production per RRC lease, typed, with liquids, gas and BOE.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [rrc_lease_key, production_month]
+    columns:
+      - name: rrc_lease_key
+        data_tests: [not_null]
+      - name: liquids_bbl
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0}
+
+  - name: stg_rrc__wells
+    columns:
+      - name: api_number
+        data_tests: [not_null, unique]
+
+  - name: stg_land__extraction_fields
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [document_id, field_name]
+    columns:
+      - name: confidence
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0, max_value: 1}
+
+  - name: stg_land__reviews
+    columns:
+      - name: action
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [accept, correct]
+
+  - name: stg_land__tract_xref
+    columns:
+      - name: allocation_pct
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0, max_value: 1}

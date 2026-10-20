@@ -1,0 +1,8 @@
+landrisk:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      # Set by cli.py from LANDRISK_DB; falls back to the default location.
+      path: "{{ env_var('LANDRISK_DB_ABS', '../data/landrisk.duckdb') }}"
+      threads: 1
