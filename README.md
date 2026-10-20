@@ -115,6 +115,18 @@ They are real documents that name real people, so everything stays under `data/`
    python cli.py --db data/real/edgar.duckdb evaluate
    ```
 
+6. Link production. Recorded leases and RRC leases share no key, so this is a suggest-and-confirm step. Load every RRC lease with wells in the leases' counties (production from 1993), then score candidates for each lease on the RRC lease name against the lessor, the operator against the lessee, and production timing against the effective date:
+   ```bash
+   python cli.py --db data/real/edgar.duckdb ingest-rrc --zip path/to/PDQ_DSV.zip --county Milam --county Caldwell ...
+   python cli.py --db data/real/edgar.duckdb link-rrc
+   ```
+   Open `data/real/edgar/rrc_candidates.csv`, put `y` in the `confirm` column of the right RRC lease for each lease (more than one if the lease feeds several), and leave a lease unmarked when none fits. Then load the links and restart the labeling API without `LANDRISK_PRODUCTION_LINKED=false`:
+   ```bash
+   python cli.py --db data/real/edgar.duckdb apply-links
+   python cli.py --db data/real/edgar.duckdb build
+   ```
+   A linked lease gets its RRC lease's whole production; real leases rarely say how a pooled unit is split.
+
 You can also fill in `labels.csv` by hand and run `load-labels` instead of steps 4 and 5: a blank cell means the lease doesn't state the field and `-` means don't score it.
 
 ## Commands
@@ -123,7 +135,9 @@ You can also fill in `labels.csv` by hand and run `load-labels` instead of steps
 | --- | --- |
 | `python cli.py demo` | Full offline run on sample data |
 | `python cli.py sample-rrc` | Write and load the synthetic RRC sample only |
-| `python cli.py ingest-rrc --zip ...` | Load the real PDQ dump, filtered to one operator |
+| `python cli.py ingest-rrc --zip ...` | Load the real PDQ dump, filtered to one operator (or `--county`, repeatable) |
+| `python cli.py link-rrc` | Suggest RRC leases for each lease document (writes `rrc_candidates.csv`) |
+| `python cli.py apply-links` | Load the RRC links confirmed in `rrc_candidates.csv` |
 | `python cli.py generate` | Generate synthetic lease PDFs and their answer key |
 | `python cli.py extract --provider groq` | Extract fields (`--provider mock` works offline) |
 | `python cli.py ingest-edgar` | Collect real executed leases from SEC EDGAR exhibits |

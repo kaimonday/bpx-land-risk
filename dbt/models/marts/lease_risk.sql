@@ -6,8 +6,9 @@
 -- raises a flag.
 {%- set as_of = "cast('" ~ var('as_of_date') ~ "' as date)" %}
 {#- A dataset not linked to RRC production can't tell "never produced" from
-    "unknown", so the production rules are switched off for it. #}
-{%- set linked = 'true' if var('production_linked') else 'false' %}
+    "unknown", so the production rules only apply to its leases with a
+    confirmed RRC link (see link_rrc.py); the rest read "production not linked". #}
+{%- set linked = "true" if var('production_linked') else "(rrc_lease_count > 0)" %}  {#- per lease: a confirmed RRC link turns the rules on #}
 
 with leases as (
     select * from {{ ref('leases') }}
@@ -23,9 +24,28 @@ production as (
     group by 1
 ),
 
-latest as (
-    select max(production_month) as latest_reported_month
+monthly as (
+    select production_month, count(*) filter (where report_filed) as filed_reports
     from {{ ref('stg_rrc__production_monthly') }}
+    group by 1
+),
+
+latest as (
+    -- The latest month RRC has fully reported. The PDQ dump carries rows for
+    -- months nobody has filed yet, and the newest filed month is usually partial:
+    -- operators file over several weeks. A month counts once its filed reports
+    -- reach 90% of the median of the six before it. Filed reports, not producing
+    -- leases: a lease that stops producing still files (with zeros), so a wave of
+    -- shut-ins can't move this date.
+    select max(production_month) filter (
+               where filed_reports > 0
+                 and (prior_median is null or filed_reports >= 0.9 * prior_median)
+           ) as latest_reported_month
+    from (
+        select *, median(filed_reports) over (
+                      order by production_month rows between 6 preceding and 1 preceding) as prior_median
+        from monthly
+    )
 ),
 
 xref as (
@@ -72,7 +92,7 @@ base as (
     from leases
     cross join latest
     left join production using (document_id)
-    left join xref using (tract_id)
+    left join xref on xref.tract_id in (leases.tract_id, leases.document_id)  -- real leases link by document id
 ),
 
 flagged as (

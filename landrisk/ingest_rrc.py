@@ -1,4 +1,5 @@
-"""Load the Texas RRC Production Data Query (PDQ) dump, filtered to one operator.
+"""Load the Texas RRC Production Data Query (PDQ) dump, filtered to one operator
+or to the leases with wells in a set of counties.
 
 The PDQ dump (PDQ_DSV.zip, ~3.7 GB) is a monthly full snapshot. Download it from
 the RRC "Data Sets Available for Download" page, then point this at the zip (or
@@ -28,6 +29,7 @@ LEASE_CYCLE_KEEP = [
     "OIL_GAS_CODE", "DISTRICT_NO", "LEASE_NO", "CYCLE_YEAR_MONTH", "OPERATOR_NO",
     "OPERATOR_NAME", "LEASE_NAME", "FIELD_NAME", "LEASE_OIL_PROD_VOL",
     "LEASE_GAS_PROD_VOL", "LEASE_COND_PROD_VOL", "LEASE_CSGD_PROD_VOL",
+    "PROD_REPORT_FILED_FLAG",  # Y once the operator files that month; months not yet filed carry N
 ]
 WELL_KEEP = [
     "OIL_GAS_CODE", "DISTRICT_NO", "LEASE_NO", "WELL_NO", "API_COUNTY_CODE",
@@ -86,14 +88,33 @@ def find_operators(src: Source, pattern: str) -> dict[str, str]:
                 if rx.search(r.get("OPERATOR_NAME", ""))}
 
 
-def ingest(src: Source, pattern: str, since: str = "201801") -> dict[str, int]:
+def leases_in_counties(src: Source, counties: list[str]) -> set[tuple[str, str, str]]:
+    """RRC leases with at least one well completed in any of these counties."""
+    wanted = {c.strip().upper() for c in counties}
+    with src.open("OG_WELL_COMPLETION") as f:
+        return {(r["OIL_GAS_CODE"], r["DISTRICT_NO"], r["LEASE_NO"]) for r in _rows(f)
+                if r.get("COUNTY_NAME", "").upper() in wanted}
+
+
+def ingest(src: Source, pattern: str | None = None, since: str = "201801",
+           counties: list[str] | None = None) -> dict[str, int]:
+    """Load production for one operator (pattern) or for every RRC lease with a
+    well in the given counties, whoever operates it."""
     init_raw()
-    operators = find_operators(src, pattern)
-    if not operators:
-        raise SystemExit(f"No RRC operator name matches /{pattern}/. Adjust RRC_OPERATOR_PATTERN.")
-    print("Matched operators:")
-    for no, name in sorted(operators.items()):
-        print(f"  {no}  {name}")
+    county_keys: set[tuple[str, str, str]] | None = None
+    operators: dict[str, str] = {}
+    if counties:
+        county_keys = leases_in_counties(src, counties)
+        print(f"{len(county_keys):,} RRC leases have wells in {', '.join(counties)}")
+        if not county_keys:
+            raise SystemExit("No RRC wells found in those counties; check the spelling.")
+    else:
+        operators = find_operators(src, pattern)
+        if not operators:
+            raise SystemExit(f"No RRC operator name matches /{pattern}/. Adjust RRC_OPERATOR_PATTERN.")
+        print("Matched operators:")
+        for no, name in sorted(operators.items()):
+            print(f"  {no}  {name}")
 
     tmp = DATA_DIR / "_rrc_tmp"
     tmp.mkdir(parents=True, exist_ok=True)
@@ -109,9 +130,13 @@ def ingest(src: Source, pattern: str, since: str = "201801") -> dict[str, int]:
             n_scanned += 1
             if n_scanned % 5_000_000 == 0:
                 print(f"  scanned {n_scanned:,} production rows, kept {n_kept:,}")
-            if r["OPERATOR_NO"] in operators and r["CYCLE_YEAR_MONTH"] >= since:
+            key = (r["OIL_GAS_CODE"], r["DISTRICT_NO"], r["LEASE_NO"])
+            keep = key in county_keys if county_keys is not None else r["OPERATOR_NO"] in operators
+            if keep and r["CYCLE_YEAR_MONTH"] >= since:
                 w.writerow([r.get(c, "") for c in LEASE_CYCLE_KEEP])
-                lease_keys.add((r["OIL_GAS_CODE"], r["DISTRICT_NO"], r["LEASE_NO"]))
+                lease_keys.add(key)
+                if county_keys is not None:
+                    operators[r["OPERATOR_NO"]] = r.get("OPERATOR_NAME", "")
                 n_kept += 1
 
     n_wells = 0

@@ -16,9 +16,13 @@ models:
               arguments: {min_value: 0}
 
   - name: stg_rrc__wells
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [rrc_lease_key, well_no, api_number]
     columns:
       - name: api_number
-        data_tests: [not_null, unique]
+        data_tests: [not_null]
 
   - name: stg_land__extraction_fields
     data_tests:

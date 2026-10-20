@@ -19,7 +19,9 @@ typed as (
         coalesce(try_cast(lease_oil_prod_vol as bigint), 0)
             + coalesce(try_cast(lease_cond_prod_vol as bigint), 0) as liquids_bbl,
         coalesce(try_cast(lease_gas_prod_vol as bigint), 0)
-            + coalesce(try_cast(lease_csgd_prod_vol as bigint), 0) as gas_mcf
+            + coalesce(try_cast(lease_csgd_prod_vol as bigint), 0) as gas_mcf,
+        -- Loads from before the flag was kept count as filed.
+        coalesce(prod_report_filed_flag, 'Y') = 'Y' as report_filed
     from src
 )
 

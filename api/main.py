@@ -119,14 +119,16 @@ def lease(document_id: str):
         fields = rows(con, """select field_name, extracted_value, final_value, confidence, llm_confidence,
                                      evidence, validation_notes, field_status, review_action, reviewer, reviewed_at
                               from main.int_lease_fields_resolved where document_id = ?""", [document_id])
+        # Stop at the last month RRC has fully reported; later rows are placeholders.
         production = rows(con, """select production_month, liquids_bbl, gas_mcf, boe
                                   from main.lease_production_monthly where document_id = ?
-                                  order by production_month""", [document_id])
+                                    and production_month <= coalesce(?, production_month)
+                                  order by production_month""", [document_id, risk[0]["latest_reported_month"]])
         wells = rows(con, """select w.api_number, w.well_no, w.county, w.rrc_lease_key
                              from main.stg_land__tract_xref x
                              join main.stg_rrc__wells w using (rrc_lease_key)
-                             where x.tract_id = (select tract_id from main.leases where document_id = ?)
-                             order by w.api_number""", [document_id])
+                             where x.tract_id in ((select tract_id from main.leases where document_id = ?), ?)
+                             order by w.api_number""", [document_id, document_id])
     order = {f.name: i for i, f in enumerate(FIELDS)}
     fields.sort(key=lambda f: order.get(f["field_name"], 99))
     return {"risk": risk[0], "fields": fields, "production": production, "wells": wells}

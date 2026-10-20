@@ -22,8 +22,10 @@ create table if not exists raw.rrc_lease_cycle (
     lease_name varchar, field_name varchar,
     lease_oil_prod_vol varchar, lease_gas_prod_vol varchar,
     lease_cond_prod_vol varchar, lease_csgd_prod_vol varchar,
-    loaded_at timestamp
+    loaded_at timestamp,
+    prod_report_filed_flag varchar
 );
+alter table raw.rrc_lease_cycle add column if not exists prod_report_filed_flag varchar;
 
 create table if not exists raw.rrc_well_completion (
     oil_gas_code varchar, district_no varchar, lease_no varchar, well_no varchar,
