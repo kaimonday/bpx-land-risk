@@ -44,6 +44,8 @@ Production gaps are measured against the latest month RRC has reported, not toda
 
 Runs everything on a synthetic RRC sample and a mock extractor, so you need no data download and no API key.
 
+Requires Python 3.11+ and Node 20+ (CI runs Python 3.12 and Node 22).
+
 ```bash
 python -m venv .venv
 # macOS/Linux: source .venv/bin/activate     Windows: .venv\Scripts\activate
@@ -57,6 +59,8 @@ cd web
 npm install
 npm run dev             # app on http://localhost:3000
 ```
+
+DuckDB allows one writer at a time, so stop `serve` before re-running `demo`, `build` or any other pipeline command.
 
 ## Real run: bpx's wells and Groq extraction
 
