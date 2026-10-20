@@ -24,6 +24,7 @@ from landrisk.config import DB_PATH, GROQ_API_KEY, LEASE_PDF_DIR, REVIEW_THRESHO
 from landrisk.db import connect, init_raw
 from landrisk.extract import extract_all, normalize
 from landrisk.fields import FIELD_BY_NAME, FIELDS
+from landrisk.link_rrc import link_detail, link_overview, save_links, search_rrc
 
 app = FastAPI(title="bpx land risk API", version="1.0.0")
 app.add_middleware(
@@ -200,6 +201,48 @@ def add_review(review: ReviewIn):
                     [str(uuid.uuid4()), review.document_id, review.field_name, action,
                      value, review.reviewer, review.note, datetime.now()])
     return {"ok": True, "stored_value": value, "note": "Run /api/refresh to apply reviews to the risk models."}
+
+
+# ---------- linking leases to RRC production ----------
+
+@app.get("/api/link/leases")
+def link_leases():
+    with db() as con:
+        return link_overview(con)
+
+
+@app.get("/api/link/leases/{document_id}")
+def link_lease(document_id: str):
+    _check_id(document_id)
+    with db() as con:
+        try:
+            return link_detail(con, document_id)
+        except KeyError:
+            raise HTTPException(404, "Lease not found")
+
+
+@app.get("/api/link/search")
+def link_search(q: str = Query(..., min_length=2, max_length=80), county: str | None = Query(None, max_length=40)):
+    with db() as con:
+        return search_rrc(con, q, county)
+
+
+class LinkIn(BaseModel):
+    rrc_leases: list[str] = Field(default_factory=list, max_length=200)
+    no_match: bool = False
+    reviewer: str = Field(default="reviewer", max_length=80)
+
+
+@app.post("/api/link/leases/{document_id}")
+def link_save(document_id: str, body: LinkIn):
+    _check_id(document_id)
+    with db() as con:
+        try:
+            save_links(con, document_id, body.rrc_leases, no_match=body.no_match, reviewer=body.reviewer)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        linked = link_detail(con, document_id)["linked"]
+    return {"ok": True, "linked": linked, "note": "Run /api/refresh to update the risk models."}
 
 
 @app.post("/api/refresh")
