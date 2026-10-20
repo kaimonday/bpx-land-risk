@@ -22,7 +22,10 @@ def _path(value: str) -> Path:
 
 DB_PATH = _path(os.getenv("LANDRISK_DB", "data/landrisk.duckdb"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+# Longer documents are split into parts of about this many tokens. The default
+# fits Groq's free tier (8,000 tokens a minute, counting the prompt and reply).
+GROQ_MAX_INPUT_TOKENS = int(os.getenv("GROQ_MAX_INPUT_TOKENS", "4000"))
 REVIEW_THRESHOLD = float(os.getenv("REVIEW_CONFIDENCE_THRESHOLD", "0.85"))
 RRC_OPERATOR_PATTERN = os.getenv("RRC_OPERATOR_PATTERN", "^BPX")
 

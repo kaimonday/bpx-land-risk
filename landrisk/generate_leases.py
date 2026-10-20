@@ -100,6 +100,7 @@ def _rrc_leases(con) -> list[dict]:
         from p, latest
         group by all
         having last_prod_ym is not null
+        order by p.oil_gas_code, p.district_no, p.lease_no  -- the caller shuffles with a fixed seed
     """).fetchall()
     out = []
     for og, dist, lno, last_ym, first_ym, latest_ym, county in rows:
