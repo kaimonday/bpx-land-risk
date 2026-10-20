@@ -71,12 +71,22 @@ export interface QueueRow {
   llm_confidence: number;
   evidence: string | null;
   validation_notes: string | null;
+  // other readings when the document disagrees with itself (parts of a long
+  // lease, or two royalty rates); null when it doesn't
+  alternatives?: Alternative[] | null;
   // present in label mode: the latest decision already saved for this field
   review_action?: "accept" | "correct" | null;
   corrected_value?: string | null;
 }
 
 export type ReviewAction = "accept" | "correct" | "absent";
+
+export interface Alternative {
+  value: string | number | boolean | null;
+  evidence: string | null;
+  confidence: number | null;
+  part: number | null; // which part of a long lease it came from
+}
 
 // Fields left out of label mode, e.g. "tract_id" for real leases, which have no tract IDs.
 export const LABEL_SKIP = process.env.NEXT_PUBLIC_LABEL_SKIP ?? "";

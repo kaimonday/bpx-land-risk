@@ -61,3 +61,18 @@ def test_merge_all_null_keeps_lowest_confidence():
     out = merge_chunks([{"depth_limit_ft": f(None, 0.9, None)}, {"depth_limit_ft": f(None, 0.7, None)}])
     assert out["depth_limit_ft"]["value"] is None
     assert out["depth_limit_ft"]["confidence"] == 0.7
+
+
+def test_merge_keeps_every_conflicting_value_with_its_quote_and_part():
+    out = merge_chunks([{"county": f("Milam", 0.9, "in the County of MILAM, State of Texas")},
+                        {"county": f("Travis", 0.8, "recorded in Travis County")},
+                        {"county": f("Milam", 0.95, "Milam County, Texas")}])
+    alts = out["county"]["alternatives"]
+    assert [a["value"] for a in alts] == ["Milam", "Travis"]
+    assert alts[0] == {"value": "Milam", "evidence": "Milam County, Texas", "confidence": 0.95, "part": 3}
+    assert alts[1]["part"] == 2
+
+
+def test_merge_agreement_has_no_alternatives():
+    out = merge_chunks([{"county": f("Milam", 0.9)}, {"county": f("milam", 0.95)}])
+    assert "alternatives" not in out["county"]

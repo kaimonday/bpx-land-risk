@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, FIELD_LABELS, fmtDate, fmtRoyalty, type QueueRow, type ReviewAction } from "@/lib/api";
+import { api, FIELD_LABELS, fmtDate, fmtRoyalty, type Alternative, type QueueRow, type ReviewAction } from "@/lib/api";
 
 type Decision = { action: ReviewAction; value: string | null };
 
@@ -20,14 +20,25 @@ function savedDecision(r: QueueRow): Decision | undefined {
   return { action: r.corrected_value == null ? "absent" : "correct", value: r.corrected_value ?? null };
 }
 
-function display(row: QueueRow): string {
-  const v = row.extracted_value;
-  if (v == null || v === "") return "Not found";
-  if (row.field_name === "royalty_rate") return fmtRoyalty(Number(v));
-  if (row.field_name === "effective_date") return fmtDate(v);
-  if (row.field_name === "pugh_clause") return v === "true" ? "Yes" : "No";
+// "1/8", "12.5%" and "0.125" are the same royalty.
+function toNumber(v: string): number {
+  const frac = v.match(/(\d+)\s*\/\s*(\d+)/);
+  if (frac) return Number(frac[1]) / Number(frac[2]);
+  const pct = v.match(/([\d.]+)\s*%/);
+  if (pct) return Number(pct[1]) / 100;
+  return Number(v.replace(/[,$]/g, ""));
+}
+
+function displayValue(field: string, raw: Alternative["value"] | string | null | undefined): string {
+  if (raw == null || raw === "") return "Not found";
+  const v = String(raw);
+  if (field === "royalty_rate") return fmtRoyalty(toNumber(v));
+  if (field === "effective_date") return fmtDate(v);
+  if (field === "pugh_clause") return ["true", "yes"].includes(v.toLowerCase()) ? "Yes" : "No";
   return v;
 }
+
+const display = (row: QueueRow) => displayValue(row.field_name, row.extracted_value);
 
 function FieldCard({ row, decision, onDecide, labeling }: {
   row: QueueRow; decision?: Decision; onDecide: (d: Decision) => Promise<void>; labeling: boolean;
@@ -50,7 +61,34 @@ function FieldCard({ row, decision, onDecide, labeling }: {
       <div className="small muted">{label}, {Math.round(row.confidence * 100)}% confidence</div>
       <div className="value">{display(row)}</div>
       {row.validation_notes && <div className="note">{row.validation_notes}</div>}
-      {row.evidence && <blockquote>{row.evidence}</blockquote>}
+      {row.alternatives?.length ? (
+        <div className="alternatives">
+          <div className="small muted">The document gives {row.alternatives.length} different values:</div>
+          {row.alternatives.map((a, i) => {
+            const shown = displayValue(row.field_name, a.value);
+            const current = shown === display(row);
+            return (
+              <div className="alternative" key={i} aria-current={current || undefined}>
+                <div className="alt-head">
+                  <span className="value">{shown}</span>
+                  <span className="small muted">
+                    {[a.part ? `part ${a.part}` : null, a.confidence != null ? `${Math.round(a.confidence * 100)}%` : null,
+                      current ? "current pick" : null].filter(Boolean).join(" · ")}
+                  </span>
+                  <button className="chip" disabled={busy}
+                          onClick={() => decide(current ? { action: "accept", value: null }
+                                                         : { action: "correct", value: String(a.value) })}>
+                    Use this
+                  </button>
+                </div>
+                {a.evidence && <blockquote>{a.evidence}</blockquote>}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        row.evidence && <blockquote>{row.evidence}</blockquote>
+      )}
       {decision ? (
         <div className="row">
           <span className="done">{decisionText(decision)}</span>

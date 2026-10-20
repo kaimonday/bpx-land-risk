@@ -20,6 +20,7 @@ select
     runs.confidence,
     runs.evidence,
     runs.validation_notes,
+    runs.alternatives,
     runs.extracted_at
 from runs
 join latest using (document_id, extraction_id)

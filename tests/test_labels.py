@@ -30,3 +30,10 @@ def test_latest_review_wins():
     reviews = [("EDG-3", "lessor", "correct", "B", T1), ("EDG-3", "lessor", "accept", None, T0)]
     done, _ = labels_from_reviews(extracted, reviews, ["lessor"], skip=set())
     assert done["EDG-3"]["lessor"] == "B"
+
+
+def test_accept_uses_the_value_seen_at_review_time_not_a_later_extraction():
+    extracted = [("EDG-4", "lessor", "Re-extracted Name")]
+    reviews = [("EDG-4", "lessor", "accept", "Name I Accepted", T0)]
+    done, _ = labels_from_reviews(extracted, reviews, ["lessor"], skip=set())
+    assert done["EDG-4"]["lessor"] == "Name I Accepted"
