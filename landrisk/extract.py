@@ -165,10 +165,20 @@ def merge_chunks(results: list[dict], kinds: dict[str, str] | None = None) -> di
         else:
             _, best = max(found, key=lambda x: conf(x[1]))
         best = dict(best)
-        values = {_comparable(kinds.get(name, "text"), it.get("value")) for _, it in found}
-        if len(values) > 1:
+        # One entry per distinct value: its most confident reading, in document order.
+        by_value: dict[str, tuple[int, dict]] = {}
+        first_seen: dict[str, int] = {}
+        for i, it in found:
+            k = _comparable(kinds.get(name, "text"), it.get("value"))
+            first_seen.setdefault(k, i)
+            if k not in by_value or conf(it) > conf(by_value[k][1]):
+                by_value[k] = (i, it)
+        if len(by_value) > 1:
             best["confidence"] = min(conf(best), 0.6)
-            best["merge_note"] = f"parts of the document disagree ({len(values)} different values)"
+            best["merge_note"] = f"parts of the document disagree ({len(by_value)} different values)"
+            best["alternatives"] = [
+                {"value": it.get("value"), "evidence": it.get("evidence"), "confidence": conf(it), "part": i + 1}
+                for k, (i, it) in sorted(by_value.items(), key=lambda kv: first_seen[kv[0]])]
         merged[name] = best
     return merged
 
@@ -225,16 +235,25 @@ def normalize(kind: str, value) -> tuple[str | None, str | None]:
     return s, None
 
 
-def _royalty_rates_in(text: str) -> set[float]:
-    rates = set()
-    for sentence in re.split(r"(?<=[.;])\s+", text):
-        if "royalt" not in sentence.lower():
+def _royalty_rates_in(text: str) -> dict[float, str]:
+    """Each royalty rate the document states, with the first sentence stating it."""
+    rates: dict[float, str] = {}
+    sole: set[float] = set()  # rates already quoted from a sentence stating only that rate
+    sentences = re.split(r"(?<=[.;])\s+", text)
+    for i, sentence in enumerate(sentences):
+        # A heading like "4. Royalties." splits off from the sentence that states the rate.
+        context = (sentences[i - 1] if i else "") + " " + sentence
+        if "royalt" not in context.lower():
             continue
-        for a, b in _FRACTION.findall(sentence):
-            if int(b) in (4, 5, 6, 8, 16, 32):
-                rates.add(round(int(a) / int(b), 4))
-        for p in _PERCENT.findall(sentence):
-            rates.add(round(float(p) / 100, 4))
+        found = [round(int(a) / int(b), 4) for a, b in _FRACTION.findall(sentence) if int(b) in (4, 5, 6, 8, 16, 32)]
+        found += [round(float(p) / 100, 4) for p in _PERCENT.findall(sentence)]
+        quote = re.sub(r"\s+", " ", sentence).strip()[:300]
+        for rate in found:
+            # Prefer a sentence that states this rate alone over one comparing two rates.
+            if rate not in rates or (len(set(found)) == 1 and rate not in sole):
+                rates[rate] = quote
+                if len(set(found)) == 1:
+                    sole.add(rate)
     return rates
 
 
@@ -279,15 +298,18 @@ def validate(raw: dict, text: str) -> list[dict]:
             if f.name == "effective_date" and not date(1950, 1, 1) <= date.fromisoformat(value) <= date.today():
                 notes.append("effective date outside 1950 to today")
                 conf = min(conf, 0.3)
+        alternatives = item.get("alternatives")  # parts of a long document that disagree
         if f.name == "royalty_rate" and len(royalty_rates) > 1:
             notes.append(f"document states {len(royalty_rates)} different royalty rates; check riders/exhibits")
             conf = min(conf, 0.6)
+            alternatives = alternatives or [{"value": str(rate), "evidence": sentence, "confidence": None, "part": None}
+                                            for rate, sentence in royalty_rates.items()]
         if f.name == "effective_date" and split_dates:
             notes.append("document has separate execution and effective dates")
             conf = min(conf, 0.75)
         rows.append({"field_name": f.name, "value": value, "llm_confidence": round(llm_conf, 3),
                      "confidence": round(conf, 3), "evidence": evidence,
-                     "validation_notes": "; ".join(notes) or None})
+                     "validation_notes": "; ".join(notes) or None, "alternatives": alternatives})
 
     # Cross-field: a shut-in clause needs both the payment and the deadline.
     by = {r["field_name"]: r for r in rows}
@@ -333,9 +355,13 @@ def extract_all(provider: str = "groq", only: list[str] | None = None, pdf_dir: 
             con.execute("insert into raw.lease_documents values (?, ?, ?, ?, ?)",
                         [doc_id, path.name, pages, len(text), stamp])
             con.executemany(
-                "insert into raw.lease_extraction_fields values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """insert into raw.lease_extraction_fields
+                   (extraction_id, document_id, provider, model, field_name, value, llm_confidence,
+                    confidence, evidence, validation_notes, extracted_at, alternatives)
+                   values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [[ext_id, doc_id, provider, model, r["field_name"], r["value"], r["llm_confidence"],
-                  r["confidence"], r["evidence"], r["validation_notes"], stamp] for r in rows])
+                  r["confidence"], r["evidence"], r["validation_notes"], stamp,
+                  json.dumps(r["alternatives"]) if r.get("alternatives") else None] for r in rows])
         low = sum(1 for r in rows if r["confidence"] < REVIEW_THRESHOLD)
         print(f"  {doc_id}: {len(rows)} fields, {low} below review threshold")
         done += 1

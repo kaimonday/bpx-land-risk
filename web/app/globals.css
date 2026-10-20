@@ -137,6 +137,13 @@ button.primary { background: var(--ink); color: var(--surface); }
 button:disabled { opacity: 0.5; cursor: progress; }
 button.chip { padding: 0.25rem 0.7rem; font-weight: 500; border-color: var(--rule-strong); }
 button.chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--surface); }
+.alternatives { margin-top: 0.5rem; display: grid; gap: 0.5rem; }
+.alternative { border-left: 3px solid var(--rule-strong); padding-left: 0.6rem; }
+.alternative[aria-current="true"] { border-left-color: var(--ink); }
+.alternative blockquote { margin-top: 0.3rem; }
+.alt-head { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+.field-card .alt-head .value { font-size: 1rem; margin: 0; }
+.alt-head .chip { margin-left: auto; }
 .mode-toggle { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
 .mode-toggle a {
   padding: 0.25rem 0.7rem; font-weight: 500; border: 1.5px solid var(--rule-strong); border-radius: 4px;

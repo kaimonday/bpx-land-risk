@@ -17,6 +17,7 @@ select
     fields.llm_confidence,
     fields.evidence,
     fields.validation_notes,
+    fields.alternatives,
     reviews.action as review_action,
     reviews.corrected_value,
     reviews.reviewer,
