@@ -58,7 +58,8 @@ def evaluate() -> dict:
     total = len(rows)
     print(f"\n{'field':28} accuracy")
     for name, (right, n) in per_field.items():
-        print(f"{name:28} {right / n:6.0%}  ({right}/{n})")
+        if n:  # fields with no labels (e.g. tract_id on real leases) aren't scored
+            print(f"{name:28} {right / n:6.0%}  ({right}/{n})")
     stats = {
         "fields": total,
         "raw_accuracy": sum(r for r, _ in per_field.values()) / total,
