@@ -25,7 +25,7 @@ from pathlib import Path
 import httpx
 from pypdf import PdfReader
 
-from .config import GROQ_API_KEY, GROQ_MODEL, LEASE_PDF_DIR, REVIEW_THRESHOLD
+from .config import GROQ_API_KEY, GROQ_MAX_INPUT_TOKENS, GROQ_MODEL, LEASE_PDF_DIR, REVIEW_THRESHOLD
 from .db import connect, init_raw
 from .fields import FIELD_BY_NAME, FIELDS
 
@@ -46,9 +46,12 @@ def _norm(s: str) -> str:
 
 # ---------- providers ----------
 
-def _prompt(text: str) -> list[dict]:
+def _prompt(text: str, part: tuple[int, int] | None = None) -> list[dict]:
     spec = "\n".join(f'- "{f.name}" ({f.kind}{"" if f.required else ", nullable"}): {f.description}'
                      for f in FIELDS)
+    if part:
+        text = (f"[This is part {part[0]} of {part[1]} of one lease. Use null, with your confidence that the "
+                f"field is not stated in this part, for anything this part does not state.]\n\n{text}")
     return [
         {"role": "system", "content": (
             "You are an experienced oil and gas land analyst abstracting lease documents. "
@@ -63,10 +66,10 @@ def _prompt(text: str) -> list[dict]:
     ]
 
 
-def call_groq(text: str, model: str = GROQ_MODEL, retries: int = 4) -> dict:
+def call_groq(text: str, model: str = GROQ_MODEL, retries: int = 6, part: tuple[int, int] | None = None) -> dict:
     if not GROQ_API_KEY:
         raise SystemExit("GROQ_API_KEY is not set. Copy .env.example to .env and add your key.")
-    body = {"model": model, "messages": _prompt(text), "temperature": 0,
+    body = {"model": model, "messages": _prompt(text, part), "temperature": 0,
             "response_format": {"type": "json_object"}}
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     for attempt in range(retries):
@@ -76,6 +79,9 @@ def call_groq(text: str, model: str = GROQ_MODEL, retries: int = 4) -> dict:
             print(f"  rate limited, waiting {wait:.0f}s")
             time.sleep(wait)
             continue
+        if r.status_code == 413:
+            raise SystemExit("Groq says the request is larger than your per-minute token limit. "
+                             "Lower GROQ_MAX_INPUT_TOKENS in .env.")
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
         return json.loads(content).get("fields", {})
@@ -107,6 +113,71 @@ def call_mock(document_id: str, text: str, seed: int = 11) -> dict:
             conf = round(rng.uniform(0.55, 0.8), 2)
         out[name] = {"value": v, "confidence": conf, "evidence": evidence}
     return out
+
+
+# ---------- long documents ----------
+
+CHARS_PER_TOKEN = 4  # rough for English legal text; the budget leaves headroom
+_AMENDMENT = re.compile(r"notwithstanding|exhibit|addendum|rider|amend", re.I)
+
+
+def chunk_text(text: str, max_chars: int, overlap: int = 400) -> list[str]:
+    """Split on line breaks into parts of at most max_chars, each starting with
+    the tail of the previous part so a clause cut at a boundary is still seen whole."""
+    if len(text) <= max_chars:
+        return [text]
+    budget = max_chars - overlap - 1  # room for the overlap and its line break
+    units = []
+    for line in text.split("\n"):
+        while len(line) > budget:  # a paragraph longer than a whole part
+            units.append(line[:budget])
+            line = line[budget:]
+        units.append(line)
+    chunks, current = [], ""
+    for unit in units:
+        if current and len(current) + 1 + len(unit) > budget:
+            chunks.append(current)
+            current = unit
+        else:
+            current = f"{current}\n{unit}" if current else unit
+    if current:
+        chunks.append(current)
+    return [c if i == 0 else chunks[i - 1][-overlap:] + "\n" + c for i, c in enumerate(chunks)]
+
+
+def merge_chunks(results: list[dict], kinds: dict[str, str] | None = None) -> dict:
+    """Combine per-part extractions into one. The most confident value wins,
+    except that a later part quoting an amendment (an Exhibit A rider, say)
+    overrides earlier parts. Parts that disagree cap confidence below review."""
+    kinds = kinds or {f.name: f.kind for f in FIELDS}
+    merged = {}
+    for name in {n for r in results for n in r}:
+        items = [(i, r[name]) for i, r in enumerate(results) if isinstance(r.get(name), dict)]
+        found = [(i, it) for i, it in items if normalize(kinds.get(name, "text"), it.get("value"))[0] is not None]
+        conf = lambda it: float(it.get("confidence") or 0)
+        if not found:
+            merged[name] = {"value": None, "evidence": None,
+                            "confidence": min((conf(it) for _, it in items), default=0.0)}
+            continue
+        amendments = [(i, it) for i, it in found if _AMENDMENT.search(it.get("evidence") or "")]
+        if amendments and max(i for i, _ in amendments) > min(i for i, _ in found):
+            _, best = max(amendments, key=lambda x: x[0])
+        else:
+            _, best = max(found, key=lambda x: conf(x[1]))
+        best = dict(best)
+        values = {_comparable(kinds.get(name, "text"), it.get("value")) for _, it in found}
+        if len(values) > 1:
+            best["confidence"] = min(conf(best), 0.6)
+            best["merge_note"] = f"parts of the document disagree ({len(values)} different values)"
+        merged[name] = best
+    return merged
+
+
+def _comparable(kind: str, value) -> str:
+    v, _ = normalize(kind, value)
+    if kind in ("decimal", "int") and v is not None:
+        return str(round(float(v), 6))
+    return _norm(v or "")
 
 
 # ---------- normalization + validation ----------
@@ -182,6 +253,9 @@ def validate(raw: dict, text: str) -> list[dict]:
         value, problem = normalize(f.kind, item.get("value"))
         evidence = (item.get("evidence") or "").strip() or None
         conf, notes = llm_conf, []
+        if item.get("merge_note"):
+            notes.append(item["merge_note"])
+            conf = min(conf, 0.6)
         if problem:
             notes.append(problem)
             conf = min(conf, 0.3)
@@ -228,20 +302,29 @@ def validate(raw: dict, text: str) -> list[dict]:
 
 # ---------- runner ----------
 
-def extract_all(provider: str = "groq", only: list[str] | None = None) -> int:
+def extract_all(provider: str = "groq", only: list[str] | None = None, pdf_dir: Path | None = None) -> int:
     init_raw()
-    pdfs = sorted(LEASE_PDF_DIR.glob("*.pdf"))
+    pdf_dir = pdf_dir or LEASE_PDF_DIR
+    pdfs = sorted(pdf_dir.glob("*.pdf"))
     if only:
         pdfs = [p for p in pdfs if p.stem in only]
     if not pdfs:
-        raise SystemExit(f"No PDFs in {LEASE_PDF_DIR}. Run `python cli.py generate` first.")
+        raise SystemExit(f"No PDFs in {pdf_dir}. Run `python cli.py generate` first.")
 
     model = GROQ_MODEL if provider == "groq" else "mock"
     done = 0
     for path in pdfs:
         doc_id = path.stem
         text, pages = pdf_text(path)
-        raw = call_groq(text) if provider == "groq" else call_mock(doc_id, text)
+        if provider == "groq":
+            parts = chunk_text(text, GROQ_MAX_INPUT_TOKENS * CHARS_PER_TOKEN)
+            if len(parts) == 1:
+                raw = call_groq(text)
+            else:
+                print(f"  {doc_id}: {len(parts)} parts")
+                raw = merge_chunks([call_groq(p, part=(i, len(parts))) for i, p in enumerate(parts, start=1)])
+        else:
+            raw = call_mock(doc_id, text)
         rows = validate(raw, text)
         ext_id = str(uuid.uuid4())
         stamp = datetime.now()  # one timestamp for the whole run
