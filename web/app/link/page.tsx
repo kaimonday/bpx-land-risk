@@ -35,9 +35,14 @@ function CandidateCard({ c, selected, onToggle }: { c: LinkCandidate; selected: 
             {c.key} · {c.operator_name ?? "operator unknown"}{c.county ? ` · ${c.county.charAt(0)}${c.county.slice(1).toLowerCase()}` : ""}
           </div>
         </div>
-        <button className={selected ? "primary" : undefined} aria-pressed={selected} onClick={onToggle}>
-          {selected ? "Selected" : "This one"}
-        </button>
+        {selected ? (
+          <div className="cand-picked">
+            <span className="done">✓ Included</span>
+            <button onClick={onToggle} aria-label={`Remove ${c.lease_name ?? c.key}`}>Remove</button>
+          </div>
+        ) : (
+          <button onClick={onToggle}>This one</button>
+        )}
       </div>
       <div className="cand-body">
         <Spark series={c.annual_boe} />
@@ -47,6 +52,11 @@ function CandidateCard({ c, selected, onToggle }: { c: LinkCandidate; selected: 
         </div>
       </div>
       <div className="small muted">{c.why}</div>
+      {c.linked_to.length > 0 && (
+        <div className="note" style={{ color: "var(--high)" }}>
+          Already linked to {c.linked_to.join(", ")}. Its production can only count for one lease.
+        </div>
+      )}
     </div>
   );
 }

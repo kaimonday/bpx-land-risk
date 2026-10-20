@@ -82,3 +82,24 @@ def test_suggest_keeps_confirmations_including_hand_added_rows(con, tmp_path, mo
     link_rrc.suggest(top=1, out=out)
     confirmed = {r["rrc_lease"] for r in csv.DictReader(out.open()) if r["confirm"] == "y"}
     assert confirmed == {"O-01-16355", "O-08-18751"}
+
+
+def test_an_rrc_lease_already_linked_elsewhere_is_refused(con):
+    # EDG-0004 (a 2013 top lease) and EDG-0001 (the 2011 lease) cover the same land;
+    # counting NOACK FARMS' production for both broke the build.
+    con.executemany("""insert into raw.lease_extraction_fields (extraction_id, document_id, provider, model, field_name,
+                       value, llm_confidence, confidence, evidence, validation_notes, extracted_at)
+                       values ('x2', 'EDG-0004', 'groq', 'm', ?, ?, 0.9, 0.9, null, null, now())""",
+                    [("lessor", "Noack Farms, LLC"), ("county", "Milam")])
+    save_links(con, "EDG-0001", ["O-01-16355"])
+    with pytest.raises(ValueError, match="EDG-0001"):
+        save_links(con, "EDG-0004", ["O-01-16355"])
+    assert link_detail(con, "EDG-0004")["linked"] == []
+    shared = next(c for c in link_detail(con, "EDG-0004")["candidates"] if c["key"] == "O-01-16355")
+    assert shared["linked_to"] == ["EDG-0001"]
+
+
+def test_relinking_the_same_lease_is_not_a_conflict(con):
+    save_links(con, "EDG-0001", ["O-01-16355"])
+    save_links(con, "EDG-0001", ["O-01-16355", "O-01-08239"])
+    assert link_detail(con, "EDG-0001")["linked"] == ["O-01-08239", "O-01-16355"]

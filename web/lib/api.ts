@@ -116,6 +116,7 @@ export interface LinkCandidate {
   score: number | null;
   why: string;
   linked: boolean;
+  linked_to: string[]; // other lease documents already linked to this RRC lease
   annual_boe: [number, number][];
 }
 

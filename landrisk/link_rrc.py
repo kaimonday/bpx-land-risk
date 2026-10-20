@@ -268,6 +268,20 @@ def _linked_keys(con, document_id: str) -> list[str]:
                                       [document_id]).fetchall()]
 
 
+def _claimed_elsewhere(con, document_id: str, keys: list[str]) -> dict[str, list[str]]:
+    """RRC leases among `keys` that other lease documents already claim."""
+    if not keys:
+        return {}
+    rows = con.execute(f"""select oil_gas_code || '-' || district_no || '-' || lease_no as key, tract_id
+                           from raw.tract_rrc_xref
+                           where tract_id <> ? and oil_gas_code || '-' || district_no || '-' || lease_no
+                                 in ({",".join("?" * len(keys))}) order by 2""", [document_id, *keys]).fetchall()
+    out: dict[str, list[str]] = {}
+    for key, doc in rows:
+        out.setdefault(key, []).append(doc)
+    return out
+
+
 def link_overview(con) -> list[dict]:
     """Each lease with its link state, for the list on the linking screen."""
     decisions = {d: dec for d, dec in con.execute(
@@ -303,7 +317,9 @@ def link_detail(con, document_id: str, top: int = 8) -> dict:
             by_key.update({c["key"]: c for c in _rrc_leases(con) if c["key"] in missing})
         chosen += [((None, "linked"), by_key[k]) for k in extra if k in by_key]
     series = _annual_boe(con, [c["key"] for _, c in chosen])
-    candidates = [{**c, "score": s, "why": why, "linked": c["key"] in linked, "annual_boe": series.get(c["key"], [])}
+    elsewhere = _claimed_elsewhere(con, document_id, [c["key"] for _, c in chosen])
+    candidates = [{**c, "score": s, "why": why, "linked": c["key"] in linked, "annual_boe": series.get(c["key"], []),
+                   "linked_to": elsewhere.get(c["key"], [])}
                   for (s, why), c in chosen]
     decision = con.execute("select arg_max(decision, decided_at) from raw.rrc_link_decisions where document_id = ?",
                            [document_id]).fetchone()[0]
@@ -321,8 +337,9 @@ def search_rrc(con, q: str, county: str | None = None, limit: int = 20) -> list[
             or q == c["key"].upper()]
     hits.sort(key=lambda c: (c["last_prod_ym"] or ""), reverse=True)
     series = _annual_boe(con, [c["key"] for c in hits[:limit]])
-    return [{**c, "score": None, "why": "search result", "linked": False, "annual_boe": series.get(c["key"], [])}
-            for c in hits[:limit]]
+    elsewhere = _claimed_elsewhere(con, "", [c["key"] for c in hits[:limit]])
+    return [{**c, "score": None, "why": "search result", "linked": False, "annual_boe": series.get(c["key"], []),
+             "linked_to": elsewhere.get(c["key"], [])} for c in hits[:limit]]
 
 
 def save_links(con, document_id: str, keys: list[str], no_match: bool = False, reviewer: str = "reviewer") -> None:
@@ -332,6 +349,16 @@ def save_links(con, document_id: str, keys: list[str], no_match: bool = False, r
         if not _KEY.match(key):
             raise ValueError(f"bad RRC lease key {key!r}; expected e.g. O-01-16355")
         parsed.append((document_id, *key.split("-", 2)))
+    # Each linked lease gets all of an RRC lease's production, so two lease
+    # documents can't share one: that would count it twice (and fails the
+    # tract_allocations_do_not_exceed_100pct test). Two documents covering the
+    # same land, like a top lease over an existing one, usually mean only one is
+    # in effect.
+    conflicts = _claimed_elsewhere(con, document_id, [] if no_match else keys)
+    if conflicts:
+        detail = "; ".join(f"{k} is already linked to {', '.join(docs)}" for k, docs in conflicts.items())
+        raise ValueError(f"{detail}. Its production can only be counted for one lease; unlink it there first "
+                         "if this lease is the one in effect.")
     con.execute("delete from raw.tract_rrc_xref where tract_id = ?", [document_id])
     if parsed:
         # A linked lease gets the whole of each RRC lease's production; real

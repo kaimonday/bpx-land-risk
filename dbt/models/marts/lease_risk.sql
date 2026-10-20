@@ -101,11 +101,13 @@ flagged as (
         {{ linked }} and not in_primary_term and not has_produced as f_expired_undeveloped,
         {{ linked }} and in_primary_term and not has_produced
             and days_to_term_end <= {{ var('expiring_window_days') }} as f_expiring_undeveloped,
-        {{ linked }} and not in_primary_term and has_produced
+        -- An unknown primary term (no effective date) can't excuse a production gap,
+        -- so these rules treat it as over rather than letting null silence them.
+        {{ linked }} and not coalesce(in_primary_term, false) and has_produced
             and months_since_production >= {{ var('hbp_gap_months') }} as f_hbp_production_gap,
-        {{ linked }} and not in_primary_term and shut_in_due_date is not null
+        {{ linked }} and not coalesce(in_primary_term, false) and shut_in_due_date is not null
             and shut_in_due_date < as_of_date as f_shut_in_overdue,
-        {{ linked }} and not in_primary_term and shut_in_due_date is not null
+        {{ linked }} and not coalesce(in_primary_term, false) and shut_in_due_date is not null
             and shut_in_due_date between as_of_date
                 and as_of_date + to_days({{ var('shut_in_warning_days') }}) as f_shut_in_due_soon,
         not {{ linked }} and not coalesce(in_primary_term, false) as f_production_not_linked,

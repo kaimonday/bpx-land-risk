@@ -150,6 +150,7 @@ button.chip[aria-pressed="true"] { border-color: var(--ink); background: var(--i
 .cand-head { display: flex; justify-content: space-between; gap: 0.75rem; align-items: start; }
 .cand-head .value { font-family: var(--font-condensed); font-size: 1.05rem; font-weight: 600; }
 .cand-head button { flex: none; white-space: nowrap; }
+.cand-picked { display: flex; gap: 0.5rem; align-items: center; flex: none; white-space: nowrap; }
 .cand-body { display: flex; gap: 0.9rem; align-items: center; flex-wrap: wrap; }
 .spark { color: var(--ink); flex: none; }
 .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }

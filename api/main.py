@@ -247,10 +247,15 @@ def link_save(document_id: str, body: LinkIn):
 
 @app.post("/api/refresh")
 def refresh():
+    from landrisk import build
     with _lock:
         ok = run_dbt("build")
     if not ok:
-        raise HTTPException(500, "dbt build failed; check the server log")
+        hints = {"tract_allocations_do_not_exceed_100pct":
+                 "an RRC lease is linked to more than one lease, so its production would be counted twice"}
+        problems = [p + (f": {hints[k]}" if (k := p.split(" ")[0]) in hints else "") for p in build.last_problems]
+        raise HTTPException(500, "Dashboard not updated. The data build failed: "
+                                 + ("; ".join(problems) or "see dbt/logs/dbt.log") + ".")
     return {"ok": True}
 
 
