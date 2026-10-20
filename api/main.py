@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from landrisk.build import run_dbt
-from landrisk.config import GROQ_API_KEY, LEASE_PDF_DIR, REVIEW_THRESHOLD
+from landrisk.config import DB_PATH, GROQ_API_KEY, LEASE_PDF_DIR, REVIEW_THRESHOLD
 from landrisk.db import connect, init_raw
 from landrisk.extract import extract_all, normalize
 from landrisk.fields import FIELD_BY_NAME, FIELDS
@@ -27,7 +27,7 @@ from landrisk.fields import FIELD_BY_NAME, FIELDS
 app = FastAPI(title="bpx land risk API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in (3000, 3001)],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -65,7 +65,7 @@ def _startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "database": DB_PATH.name}
 
 
 @app.get("/api/summary")
@@ -129,10 +129,36 @@ def review_queue():
         return rows(con, "select * from main.review_queue order by document_id, confidence")
 
 
+@app.get("/api/label-fields")
+def label_fields(skip: str = Query("", max_length=200)):
+    """Every field of every document with its latest decision, for labeling.
+
+    Reads the raw tables directly, so new decisions show up without a dbt
+    rebuild. `skip` is a comma-separated list of fields to leave out."""
+    skipped = [f for f in skip.split(",") if f in FIELD_BY_NAME]
+    with db() as con:
+        out = rows(con, """
+            with latest as (select document_id, arg_max(extraction_id, extracted_at) as eid
+                            from raw.lease_extraction_fields group by 1),
+            decisions as (select document_id, field_name, arg_max(action, reviewed_at) as review_action,
+                                 arg_max(corrected_value, reviewed_at) as corrected_value
+                          from raw.lease_reviews group by 1, 2)
+            select e.document_id, e.field_name, e.value as extracted_value, e.confidence, e.llm_confidence,
+                   e.evidence, e.validation_notes, d.review_action, d.corrected_value
+            from raw.lease_extraction_fields e
+            join latest l on l.document_id = e.document_id and l.eid = e.extraction_id
+            left join decisions d on d.document_id = e.document_id and d.field_name = e.field_name
+            order by e.document_id""")
+    order = {f.name: i for i, f in enumerate(FIELDS)}
+    out = [r for r in out if r["field_name"] not in skipped]
+    out.sort(key=lambda r: (r["document_id"], order.get(r["field_name"], 99)))
+    return out
+
+
 class ReviewIn(BaseModel):
     document_id: str
     field_name: str
-    action: Literal["accept", "correct"]
+    action: Literal["accept", "correct", "absent"]  # absent: the lease doesn't state this field
     corrected_value: str | None = None
     reviewer: str = Field(default="demo-user", max_length=80)
     note: str | None = Field(default=None, max_length=500)
@@ -144,14 +170,16 @@ def add_review(review: ReviewIn):
     field = FIELD_BY_NAME.get(review.field_name)
     if not field:
         raise HTTPException(400, "Unknown field")
-    value = None
-    if review.action == "correct":
+    value, action = None, review.action
+    if action == "absent":
+        action = "correct"  # stored as a correction to null
+    elif action == "correct":
         value, problem = normalize(field.kind, review.corrected_value)
         if problem or (value is None and field.required):
             raise HTTPException(422, problem or "A corrected value is required for this field")
     with db() as con:
         con.execute("insert into raw.lease_reviews values (?, ?, ?, ?, ?, ?, ?, ?)",
-                    [str(uuid.uuid4()), review.document_id, review.field_name, review.action,
+                    [str(uuid.uuid4()), review.document_id, review.field_name, action,
                      value, review.reviewer, review.note, datetime.now()])
     return {"ok": True, "stored_value": value, "note": "Run /api/refresh to apply reviews to the risk models."}
 

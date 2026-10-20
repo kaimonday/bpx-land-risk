@@ -71,7 +71,15 @@ export interface QueueRow {
   llm_confidence: number;
   evidence: string | null;
   validation_notes: string | null;
+  // present in label mode: the latest decision already saved for this field
+  review_action?: "accept" | "correct" | null;
+  corrected_value?: string | null;
 }
+
+export type ReviewAction = "accept" | "correct" | "absent";
+
+// Fields left out of label mode, e.g. "tract_id" for real leases, which have no tract IDs.
+export const LABEL_SKIP = process.env.NEXT_PUBLIC_LABEL_SKIP ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { cache: "no-store", ...init });
@@ -91,7 +99,9 @@ export const api = {
   risks: () => request<LeaseRisk[]>("/api/risks"),
   lease: (id: string) => request<LeaseDetail>(`/api/leases/${encodeURIComponent(id)}`),
   queue: () => request<QueueRow[]>("/api/review-queue"),
-  review: (body: { document_id: string; field_name: string; action: "accept" | "correct"; corrected_value?: string }) =>
+  labelFields: () => request<QueueRow[]>(`/api/label-fields?skip=${encodeURIComponent(LABEL_SKIP)}`),
+  health: () => request<{ ok: boolean; database: string }>("/api/health"),
+  review: (body: { document_id: string; field_name: string; action: ReviewAction; corrected_value?: string }) =>
     request<{ ok: boolean; stored_value: string | null }>("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -244,3 +244,74 @@ def load_labels(path: Path = EDGAR_DIR / "labels.csv") -> int:
         con.executemany("insert into raw.lease_ground_truth values (?, ?, ?, null, 'edgar')", rows)
     print(f"loaded {len(rows)} labels for {len(docs)} documents")
     return len(docs)
+
+
+# ---------- labels from the review screen ----------
+
+def labels_from_reviews(extracted, reviews, field_names, skip):
+    """Turn label-mode reviews into answer-key rows.
+
+    extracted: (document_id, field_name, extracted_value) from the latest run.
+    reviews: (document_id, field_name, action, corrected_value, reviewed_at).
+    Returns ({document_id: {field: value}} for fully labeled documents,
+             {document_id: (labeled, total)}). Accept keeps the extracted value,
+    correct uses the corrected one (None means "not in the lease").
+    """
+    latest = {}
+    for doc, field, action, value, at in reviews:
+        if (doc, field) not in latest or at > latest[(doc, field)][2]:
+            latest[(doc, field)] = (action, value, at)
+    values = {(d, f): v for d, f, v in extracted}
+    done, progress = {}, {}
+    for doc in sorted({d for d, _, _ in extracted}):
+        fields = [f for f in field_names if f not in skip and (doc, f) in values]
+        labeled = {}
+        for f in fields:
+            if (doc, f) in latest:
+                action, value, _ = latest[(doc, f)]
+                labeled[f] = value if action == "correct" else values[(doc, f)]
+        progress[doc] = (len(labeled), len(fields))
+        if fields and len(labeled) == len(fields):
+            done[doc] = labeled
+    return done, progress
+
+
+def export_labels(out_dir: Path = EDGAR_DIR, skip: set[str] = frozenset({"tract_id"})) -> int:
+    """Write labels.csv and training.jsonl from finished label-mode reviews and
+    load them as the answer key. Leases with unlabeled fields are held back."""
+    import json
+
+    from .extract import pdf_text
+
+    with connect(must_exist=True) as con:
+        extracted = con.execute("""
+            with latest as (select document_id, arg_max(extraction_id, extracted_at) as eid
+                            from raw.lease_extraction_fields group by 1)
+            select e.document_id, e.field_name, e.value from raw.lease_extraction_fields e
+            join latest l on l.document_id = e.document_id and l.eid = e.extraction_id""").fetchall()
+        reviews = con.execute("""select document_id, field_name, action, corrected_value, reviewed_at
+                                 from raw.lease_reviews""").fetchall()
+    done, progress = labels_from_reviews(extracted, reviews, FIELD_NAMES, set(skip))
+    for doc, (n, total) in progress.items():
+        print(f"  {doc}: {n}/{total} fields labeled{'' if n == total else '  (held back)'}")
+    if not done:
+        print("No fully labeled leases yet.")
+        return 0
+
+    sources = {}
+    if (out_dir / "manifest.csv").exists():
+        sources = {m["document_id"]: m["source_url"] for m in csv.DictReader((out_dir / "manifest.csv").open())}
+    labels_path = out_dir / "labels.csv"
+    with labels_path.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, ["document_id", "source_url", *FIELD_NAMES])
+        w.writeheader()
+        for doc, fields in done.items():
+            row = {f: (SKIP if f in skip else (fields.get(f) or "")) for f in FIELD_NAMES}
+            w.writerow({"document_id": doc, "source_url": sources.get(doc, ""), **row})
+    with (out_dir / "training.jsonl").open("w") as fh:
+        for doc, fields in done.items():
+            text, _ = pdf_text(out_dir / "pdfs" / f"{doc}.pdf")
+            fh.write(json.dumps({"document_id": doc, "source_url": sources.get(doc), "text": text,
+                                 "fields": fields}) + "\n")
+    print(f"wrote {labels_path} and training.jsonl for {len(done)} leases")
+    return load_labels(labels_path)

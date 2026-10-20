@@ -2,9 +2,23 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { api, FIELD_LABELS, fmtDate, fmtRoyalty, type QueueRow } from "@/lib/api";
+import Link from "next/link";
+import { api, FIELD_LABELS, fmtDate, fmtRoyalty, type QueueRow, type ReviewAction } from "@/lib/api";
 
-type Decision = { action: "accept" | "correct"; value: string | null };
+type Decision = { action: ReviewAction; value: string | null };
+
+function decisionText(d: Decision): string {
+  if (d.action === "accept") return "Accepted";
+  if (d.action === "absent" || d.value == null) return "Marked not in lease";
+  return `Corrected to ${d.value}`;
+}
+
+// A decision already saved for this field (label mode loads these with the fields).
+function savedDecision(r: QueueRow): Decision | undefined {
+  if (!r.review_action) return undefined;
+  if (r.review_action === "accept") return { action: "accept", value: null };
+  return { action: r.corrected_value == null ? "absent" : "correct", value: r.corrected_value ?? null };
+}
 
 function display(row: QueueRow): string {
   const v = row.extracted_value;
@@ -15,8 +29,8 @@ function display(row: QueueRow): string {
   return v;
 }
 
-function FieldCard({ row, decision, onDecide }: {
-  row: QueueRow; decision?: Decision; onDecide: (d: Decision) => Promise<void>;
+function FieldCard({ row, decision, onDecide, labeling }: {
+  row: QueueRow; decision?: Decision; onDecide: (d: Decision) => Promise<void>; labeling: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(row.extracted_value ?? "");
@@ -39,7 +53,7 @@ function FieldCard({ row, decision, onDecide }: {
       {row.evidence && <blockquote>{row.evidence}</blockquote>}
       {decision ? (
         <div className="row">
-          <span className="done">{decision.action === "accept" ? "Accepted" : `Corrected to ${decision.value}`}</span>
+          <span className="done">{decisionText(decision)}</span>
           <button className="chip" onClick={() => setEditing(true)} disabled={busy}>Change</button>
         </div>
       ) : null}
@@ -57,6 +71,9 @@ function FieldCard({ row, decision, onDecide }: {
           <div className="row">
             <button className="primary" onClick={() => decide({ action: "accept", value: null })} disabled={busy}>Accept</button>
             <button onClick={() => setEditing(true)} disabled={busy}>Correct</button>
+            {labeling && (
+              <button onClick={() => decide({ action: "absent", value: null })} disabled={busy}>Not in lease</button>
+            )}
           </div>
         )
       )}
@@ -67,6 +84,7 @@ function FieldCard({ row, decision, onDecide }: {
 
 function ReviewQueue() {
   const params = useSearchParams();
+  const labeling = params.get("mode") === "label";
   const [queue, setQueue] = useState<QueueRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(params.get("doc"));
@@ -75,8 +93,18 @@ function ReviewQueue() {
   const [applied, setApplied] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api.queue().then((q) => { setQueue(q); setDecisions({}); }).catch((e: Error) => setError(e.message));
-  }, []);
+    (labeling ? api.labelFields() : api.queue())
+      .then((q) => {
+        setQueue(q);
+        const saved: Record<string, Decision> = {};
+        for (const r of q) {
+          const d = savedDecision(r);
+          if (d) saved[`${r.document_id}/${r.field_name}`] = d;
+        }
+        setDecisions(saved);
+      })
+      .catch((e: Error) => setError(e.message));
+  }, [labeling]);
   useEffect(load, [load]);
 
   const docs = useMemo(() => {
@@ -100,19 +128,38 @@ function ReviewQueue() {
   if (error) return <div className="notice error"><p>{error}</p></div>;
   if (!queue) return <p className="muted">Loading review queue…</p>;
 
+  const finished = docs.filter(([, items]) => items.every((r) => decisions[key(r)])).length;
+
   return (
     <>
+      <nav className="mode-toggle" aria-label="Review mode">
+        <Link aria-current={labeling ? undefined : "page"} href="/review">Needs review</Link>
+        <Link aria-current={labeling ? "page" : undefined} href="/review?mode=label">Label all fields</Link>
+      </nav>
       <div className="page-head">
-        <div>
-          <h1>{queue.length === 0 ? "Review queue is clear" : `${queue.length} fields need a second look`}</h1>
-          <p className="muted">
-            These fields scored below the confidence threshold, or failed a check against the document.
-            Compare each with the lease, then accept or correct it.
-          </p>
-        </div>
-        <button className="primary" onClick={apply} disabled={decided === 0 || applying}>
-          {applying ? "Applying reviews…" : `Apply ${decided} review${decided === 1 ? "" : "s"}`}
-        </button>
+        {labeling ? (
+          <div>
+            <h1>{decided} of {queue.length} fields labeled</h1>
+            <p className="muted">
+              Check every field against the lease, including confident ones, so the labels can score the extractor.
+              Use Not in lease when the document doesn&apos;t state a field. Labels save as you go; {finished} of{" "}
+              {docs.length} leases are complete. When you&apos;re done, run <code>export-labels</code>.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <h1>{queue.length === 0 ? "Review queue is clear" : `${queue.length} fields need a second look`}</h1>
+            <p className="muted">
+              These fields scored below the confidence threshold, or failed a check against the document.
+              Compare each with the lease, then accept or correct it.
+            </p>
+          </div>
+        )}
+        {!labeling && (
+          <button className="primary" onClick={apply} disabled={decided === 0 || applying}>
+            {applying ? "Applying reviews…" : `Apply ${decided} review${decided === 1 ? "" : "s"}`}
+          </button>
+        )}
       </div>
       {applied && <div className="notice"><p>{applied}</p></div>}
 
@@ -142,6 +189,7 @@ function ReviewQueue() {
               <FieldCard
                 key={key(r)}
                 row={r}
+                labeling={labeling}
                 decision={decisions[key(r)]}
                 onDecide={async (d) => {
                   const res = await api.review({
