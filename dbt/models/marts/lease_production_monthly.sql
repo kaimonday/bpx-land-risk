@@ -20,6 +20,7 @@ select
     sum(production.boe * xref.allocation_pct) as boe,
     string_agg(distinct production.rrc_lease_key, ', ') as rrc_lease_keys
 from leases
-join xref using (tract_id)
+-- Real leases have no tract id and are linked by document id instead.
+join xref on xref.tract_id in (leases.tract_id, leases.document_id)
 join production using (rrc_lease_key)
 group by 1, 2

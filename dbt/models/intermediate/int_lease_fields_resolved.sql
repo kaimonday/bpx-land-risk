@@ -26,6 +26,9 @@ select
          else fields.extracted_value end as final_value,
     case when reviews.action is not null then 'reviewed'
          when fields.confidence >= {{ var('review_threshold') }} then 'auto_accepted'
+         {%- for f in var('review_skip_fields') %}
+         when fields.field_name = '{{ f }}' then 'not_reviewed'
+         {%- endfor %}
          else 'needs_review' end as field_status
 from fields
 left join reviews using (document_id, field_name)

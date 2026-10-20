@@ -13,7 +13,7 @@ export interface LeaseRisk {
   effective_date: string | null;
   primary_term_months: number | null;
   primary_term_end: string | null;
-  lease_status: "primary_term" | "held_by_production" | "past_primary_term";
+  lease_status: "primary_term" | "held_by_production" | "past_primary_term" | "production_not_linked";
   has_produced: boolean;
   last_production_month: string | null;
   months_since_production: number | null;
@@ -146,6 +146,7 @@ export const FLAG_LABELS: Record<string, string> = {
   hbp_production_gap: "Production stopped",
   expiring_undeveloped: "Term ending, undeveloped",
   shut_in_payment_due_soon: "Shut-in payment due soon",
+  production_not_linked: "Production not linked",
   unverified_extraction: "Fields awaiting review",
 };
 
@@ -153,7 +154,12 @@ export const STATUS_LABELS: Record<LeaseRisk["lease_status"], string> = {
   primary_term: "Primary term",
   held_by_production: "Held by production",
   past_primary_term: "Past primary term",
+  production_not_linked: "Production not linked",
 };
+
+// Real leases have no tract ID; fall back to the document ID.
+export const leaseName = (r: { tract_id: string | null; document_id: string; lessor: string | null }) =>
+  [r.tract_id ?? r.document_id, r.lessor].filter(Boolean).join(", ");
 
 export function fmtDate(d: string | null | undefined): string {
   if (!d) return "";

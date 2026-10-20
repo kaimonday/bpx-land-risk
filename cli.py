@@ -21,7 +21,15 @@ def main(argv: list[str] | None = None) -> int:
     src.add_argument("--zip", type=Path, help="Path to PDQ_DSV.zip")
     src.add_argument("--dir", type=Path, help="Folder of extracted .dsv files")
     s.add_argument("--pattern", help="Regex for operator names (default: RRC_OPERATOR_PATTERN from .env)")
-    s.add_argument("--since", default="201801", help="First production month to keep, YYYYMM")
+    s.add_argument("--county", action="append", help="Keep every RRC lease with wells in this county instead "
+                   "of filtering by operator (repeatable)")
+    s.add_argument("--since", help="First production month to keep, YYYYMM (default 201801, or 199301 with --county)")
+
+    s = sub.add_parser("link-rrc", help="Suggest RRC leases for each lease document and write a candidates CSV")
+    s.add_argument("--top", type=int, default=5)
+
+    s = sub.add_parser("apply-links", help="Load the RRC links confirmed in the candidates CSV")
+    s.add_argument("--file", type=Path, help="Default: data/real/edgar/rrc_candidates.csv")
 
     s = sub.add_parser("generate", help="Generate synthetic lease PDFs tied to the loaded RRC leases")
     s.add_argument("--count", type=int, default=18)
@@ -70,8 +78,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "ingest-rrc":
         from landrisk.config import RRC_OPERATOR_PATTERN
         from landrisk.ingest_rrc import Source, ingest
-        ingest(Source(zip_path=args.zip, dir_path=args.dir),
-               pattern=args.pattern or RRC_OPERATOR_PATTERN, since=args.since)
+        ingest(Source(zip_path=args.zip, dir_path=args.dir), pattern=args.pattern or RRC_OPERATOR_PATTERN,
+               since=args.since or ("199301" if args.county else "201801"), counties=args.county)
+    elif args.cmd == "link-rrc":
+        from landrisk.link_rrc import suggest
+        suggest(top=args.top)
+    elif args.cmd == "apply-links":
+        from landrisk.link_rrc import CANDIDATES, apply_links
+        apply_links(args.file or CANDIDATES)
     elif args.cmd == "generate":
         from landrisk.generate_leases import generate
         generate(count=args.count, seed=args.seed)
