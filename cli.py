@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="cli.py", description="bpx land risk pipeline")
+    p = argparse.ArgumentParser(prog="cli.py", description="Land risk monitor pipeline")
     p.add_argument("--db", help="DuckDB file to use instead of LANDRISK_DB, e.g. data/real/edgar.duckdb")
     sub = p.add_subparsers(dest="cmd", required=True)
 

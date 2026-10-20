@@ -26,7 +26,7 @@ from landrisk.extract import extract_all, normalize
 from landrisk.fields import FIELD_BY_NAME, FIELDS
 from landrisk.link_rrc import link_detail, link_overview, save_links, search_rrc
 
-app = FastAPI(title="bpx land risk API", version="1.0.0")
+app = FastAPI(title="Land risk monitor API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in (3000, 3001)],

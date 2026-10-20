@@ -1,10 +1,40 @@
-# bpx land risk
+# Land risk monitor
 
-Turns oil and gas lease documents into structured records, joins them to public Texas Railroad Commission (RRC) production for bpx's wells, and flags leases at risk of lapsing.
+Turns oil and gas lease documents into structured, confidence-scored records, links them to public Texas Railroad Commission (RRC) production, and flags leases at risk of lapsing: shut-in payments coming due, production gaps, primary terms ending undeveloped.
 
-The demo in one sentence: a scanned lease becomes a confidence-scored record in seconds, a person checks only the shaky fields, and the record lands in a risk view that shows which leases need action and by when.
+A lease becomes a record in seconds, a person checks only the shaky fields, and the record lands in a risk view that shows which leases need action and by when. It runs end to end on synthetic leases (offline, two minutes), and on 20 real signed leases from SEC filings joined to 3.4 million months of RRC production.
 
-> **Synthetic documents.** The lease PDFs are generated for this demo, watermarked on every page, and name a fictional lessee. Only the production data is real (public RRC data). Nothing here is a real bpx record.
+![Risk dashboard on the synthetic demo](docs/img/dashboard.png)
+
+## What real data taught me
+
+The synthetic demo scores almost perfectly, because the generator and the extractor were written together. The useful work started when the same pipeline met real leases and real RRC data.
+
+| | Synthetic demo (18 leases) | Real leases (20, SEC exhibits) |
+| --- | --- | --- |
+| Fields a person still has to check | 10% | 36% |
+| Pugh clause accuracy | 100% | **50%** (10/20) |
+| Fields skipped review that were wrong | 0 | 1 of 166 (a Pugh false alarm at 99% confidence) |
+
+- **The model mistakes lookalike clauses for Pugh clauses.** All 9 Pugh false alarms were a voluntary surrender clause ("Lessee may at any time ... deliver a release") or a shut-in clause, neither of which ends the lease as to non-producing land. The field definition now names both; a re-run to measure the effect is pending.
+- **My first labels just agreed with the model.** All 260 matched its output, so `evaluate` reported a meaningless 100%. Labeling is now blind by option: the model's answer stays hidden until you record yours.
+- **Checks tuned on synthetic text misfire on real text.** The two-royalty-rates check flagged 3 real leases for late-payment interest and an overriding royalty (now 0); the verbatim-evidence check fails quotes the model shortens with "...", which drives much of the 36%.
+- **RRC's newest months aren't real yet.** The PDQ dump carries unfiled placeholder months (zero production everywhere) and a partly filed newest month. Measuring gaps to the newest row overstated every production gap by 3 to 4 months and raised false shut-in alerts. The latest month is now the last one whose filed reports reach 90% of normal, using RRC's report-filed flag. A version based on producing leases was rejected because a wave of shut-ins would move the date.
+- **Recorded leases and RRC leases share no key.** Linking is suggest-and-confirm: candidates in the lease's county scored on lessor surname against RRC lease name, operator against lessee, and timing. The land description turned out to be the best signal: leases on producing land name the RRC lease ("The F. C. Hinds oil and gas lease") or cite its number.
+- **Once linked, the alerts are real.** A Milam County lease's RRC lease stopped producing in February 2026 and its 90-day shut-in deadline has passed; a Johnson County lease is held by 34 Barnett Shale gas wells drilled after it was signed; an undated Shackelford County lease shows no production since 1997 (which also exposed a bug: an unknown primary term silenced every production rule).
+
+<table><tr>
+<td width="62%"><img src="docs/img/lease.png" alt="Lease page with production history and abstracted terms"></td>
+<td><img src="docs/img/conflict.png" alt="Review card showing both royalty rates a lease states, each with its clause"><br><sub>When a lease contradicts itself (here an Exhibit A rider), the review card shows every reading with its clause.</sub></td>
+</tr></table>
+
+## What's real and what isn't
+
+- **The demo leases are synthetic**: generated, watermarked on every page, and naming a fictional lessee. Nothing here is a bpx record. The production data is real public RRC data.
+- **The 20 real leases** are signed leases small operators filed as SEC exhibits, mostly Texas Producers 88 forms from 1989 to 2026. They name real people, so they stay local (`data/` is gitignored) and none appear in this repo.
+- **The real-lease answer key is partial.** Pugh labels were made blind against quoted clauses (by an AI assistant, with each label's deciding quote saved for audit; a landman's review would make them authoritative). The other fields were labeled by accepting the model's output, so their scores measure agreement, not accuracy, and aren't reported above.
+- **6 of the 20 leases are linked to RRC production** with confidence; the rest need legal descriptions or well locations a landman would check.
+- **Built with an AI pair programmer** (Claude Code). The design decisions and their tradeoffs are written up in [docs/decisions.md](docs/decisions.md).
 
 ## How it works
 
@@ -15,7 +45,7 @@ flowchart LR
     V -->|confident| W[(DuckDB raw)]
     V -->|low confidence| Q[Review queue<br/>Next.js]
     Q -->|accept / correct| W
-    RRC[RRC PDQ dump<br/>filtered to bpx] --> W
+    RRC[RRC PDQ dump<br/>filtered to an operator<br/>or counties] --> W
     W --> DBT[dbt models + tests]
     DBT --> R[lease_risk mart]
     R --> API[FastAPI] --> UI[Risk dashboard<br/>Next.js]
@@ -62,11 +92,11 @@ npm run dev             # app on http://localhost:3000
 
 DuckDB allows one writer at a time, so stop `serve` before re-running `demo`, `build` or any other pipeline command.
 
-## Real run: bpx's wells and Groq extraction
+## Real run: one operator's wells and Groq extraction
 
 1. **Set up secrets.** Copy `.env.example` to `.env` and add your `GROQ_API_KEY`. `.env` is gitignored; never commit it.
 2. **Download the RRC production dump.** From the RRC [Data Sets Available for Download](https://www.rrc.texas.gov/resource-center/research/data-sets-available-for-download/) page, get the Production Data Query Dump (`PDQ_DSV.zip`, about 3.7 GB, refreshed monthly).
-3. **Load bpx's leases.** This streams the zip and keeps only operators matching `RRC_OPERATOR_PATTERN` (default `^BPX`). Check the matched names it prints and tighten the pattern if needed.
+3. **Load an operator's leases.** This streams the zip and keeps only operators matching `RRC_OPERATOR_PATTERN` (default `^BPX`, bpx Energy). Check the matched names it prints and tighten the pattern if needed.
    ```bash
    python cli.py ingest-rrc --zip path/to/PDQ_DSV.zip --since 201801
    ```
@@ -154,7 +184,8 @@ You can also fill in `labels.csv` by hand and run `load-labels` instead of steps
 landrisk/         Python pipeline: RRC ingest, lease generator, extraction, evaluation
 dbt/              dbt project (DuckDB): staging, intermediate, marts, tests
 api/              FastAPI service
-web/              Next.js app: risk dashboard, lease pages, review queue
+web/              Next.js app: risk dashboard, lease pages, review queue, labeling, production linking
+docs/             Design decisions and screenshots
 data/             Local database, PDFs and downloads (gitignored)
 ```
 
