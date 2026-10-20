@@ -22,3 +22,29 @@ def test_each_rate_is_quoted_from_the_sentence_that_states_it_alone():
     by_value = {a["value"]: a["evidence"] for a in row["alternatives"]}
     assert "Lessee shall deliver" in by_value["0.125"]
     assert "one-fifth (1/5)" in by_value["0.2"]
+
+
+def _rates(text):
+    from landrisk.extract import _royalty_rates_in
+    return set(_royalty_rates_in(text))
+
+
+def test_interest_on_late_royalty_is_not_a_royalty_rate():
+    # EDG-0001 / EDG-0004
+    text = ("Royalties on oil, gas and other substances shall be one-sixth (1/6) of such production. "
+            "If any bonus or royalty is not paid when due, such unpaid amounts shall bear interest at 18% per annum.")
+    assert _rates(text) == {0.1667}
+
+
+def test_overriding_royalty_in_an_attached_assignment_is_not_the_lessor_royalty():
+    # EDG-0006
+    text = ("Royalties on oil and gas shall be one-eighth (1/8). "
+            "Assignor expressly excepts and reserves an overriding royalty interest equal to 25% of 8/8ths. "
+            "The overriding royalty interest reserved by Assignor shall be subject to proportionate reduction (100%).")
+    assert _rates(text) == {0.125}
+
+
+def test_real_rider_rate_still_counts():
+    text = ("Lessor's royalty shall be one-eighth (1/8). "
+            "EXHIBIT A. Notwithstanding the foregoing, the royalty shall be twenty-five percent (25%).")
+    assert _rates(text) == {0.125, 0.25}
