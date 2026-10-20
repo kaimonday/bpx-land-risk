@@ -6,7 +6,8 @@ select
     confidence,
     llm_confidence,
     evidence,
-    validation_notes
+    validation_notes,
+    alternatives
 from {{ ref('int_lease_fields_resolved') }}
 where field_status = 'needs_review'
 order by confidence, document_id, field_name

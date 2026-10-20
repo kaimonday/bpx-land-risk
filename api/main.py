@@ -6,6 +6,7 @@ rebuilds run under the same lock.
 """
 from __future__ import annotations
 
+import json
 import re
 import threading
 import uuid
@@ -50,6 +51,14 @@ def rows(con, sql: str, params: list | None = None) -> list[dict]:
     cur = con.execute(sql, params or [])
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _with_alternatives(out: list[dict]) -> list[dict]:
+    """The alternatives column is a JSON string in the warehouse; send it as a list."""
+    for r in out:
+        if "alternatives" in r:
+            r["alternatives"] = json.loads(r["alternatives"]) if r["alternatives"] else None
+    return out
 
 
 def _check_id(document_id: str) -> str:
@@ -126,7 +135,7 @@ def lease(document_id: str):
 @app.get("/api/review-queue")
 def review_queue():
     with db() as con:
-        return rows(con, "select * from main.review_queue order by document_id, confidence")
+        return _with_alternatives(rows(con, "select * from main.review_queue order by document_id, confidence"))
 
 
 @app.get("/api/label-fields")
@@ -144,13 +153,13 @@ def label_fields(skip: str = Query("", max_length=200)):
                                  arg_max(corrected_value, reviewed_at) as corrected_value
                           from raw.lease_reviews group by 1, 2)
             select e.document_id, e.field_name, e.value as extracted_value, e.confidence, e.llm_confidence,
-                   e.evidence, e.validation_notes, d.review_action, d.corrected_value
+                   e.evidence, e.validation_notes, e.alternatives, d.review_action, d.corrected_value
             from raw.lease_extraction_fields e
             join latest l on l.document_id = e.document_id and l.eid = e.extraction_id
             left join decisions d on d.document_id = e.document_id and d.field_name = e.field_name
             order by e.document_id""")
     order = {f.name: i for i, f in enumerate(FIELDS)}
-    out = [r for r in out if r["field_name"] not in skipped]
+    out = _with_alternatives([r for r in out if r["field_name"] not in skipped])
     out.sort(key=lambda r: (r["document_id"], order.get(r["field_name"], 99)))
     return out
 
@@ -178,6 +187,13 @@ def add_review(review: ReviewIn):
         if problem or (value is None and field.required):
             raise HTTPException(422, problem or "A corrected value is required for this field")
     with db() as con:
+        if action == "accept":
+            # Keep the value the reviewer accepted, so re-extracting the document
+            # later can't silently change what was approved.
+            hit = con.execute("""select arg_max(value, extracted_at) from raw.lease_extraction_fields
+                                 where document_id = ? and field_name = ?""",
+                              [review.document_id, review.field_name]).fetchone()
+            value = hit[0] if hit else None
         con.execute("insert into raw.lease_reviews values (?, ?, ?, ?, ?, ?, ?, ?)",
                     [str(uuid.uuid4()), review.document_id, review.field_name, action,
                      value, review.reviewer, review.note, datetime.now()])
