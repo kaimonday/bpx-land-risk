@@ -99,12 +99,15 @@ They are real documents that name real people, so everything stays under `data/`
    ```
 4. Label them in the browser. Run a second copy of the app against the EDGAR database (the demo keeps running on 3000/8000):
    ```bash
-   LANDRISK_DB=data/real/edgar.duckdb LANDRISK_PDF_DIR=data/real/edgar/pdfs python cli.py serve --port 8001
+   LANDRISK_DB=data/real/edgar.duckdb LANDRISK_PDF_DIR=data/real/edgar/pdfs \
+     LANDRISK_PRODUCTION_LINKED=false LANDRISK_REVIEW_SKIP_FIELDS=tract_id python cli.py serve --port 8001
 
    # in web/
    NEXT_DIST_DIR=.next-real NEXT_PUBLIC_API_URL=http://localhost:8001 NEXT_PUBLIC_LABEL_SKIP=tract_id \
      NEXT_PUBLIC_SITE_NOTE="Real leases from SEC EDGAR filings: labeling" npx next dev -p 3001
    ```
+   `LANDRISK_PRODUCTION_LINKED=false` tells the risk rules these leases aren't linked to RRC production yet, so the dashboard says production is unknown instead of flagging them as never produced. `LANDRISK_REVIEW_SKIP_FIELDS=tract_id` stops the missing tract IDs counting as fields awaiting review.
+
    Open http://localhost:3001/review?mode=label. **Label all fields** shows every field, not only the low-confidence ones, next to the PDF: accept it, correct it, or mark it **Not in lease**. Checking the confident fields too is what makes the labels able to measure auto-accept precision. Labels save as you go. `tract_id` is left out because real leases describe land by survey and abstract, not tract IDs.
 5. Export and score. `export-labels` uses only leases with every field labeled, writes `labels.csv` and `training.jsonl` (document text plus correct fields), and loads them as the answer key:
    ```bash

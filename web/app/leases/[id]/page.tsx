@@ -4,8 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import {
   api, FIELD_LABELS, FLAG_LABELS, STATUS_LABELS, fmtDate, fmtMonth, fmtNumber, fmtRoyalty,
-  type FieldRow, type LeaseDetail,
-} from "@/lib/api";
+  type FieldRow, type LeaseDetail, leaseName } from "@/lib/api";
 import ProductionChart from "./production-chart";
 
 function Confidence({ value, threshold = 0.85 }: { value: number; threshold?: number }) {
@@ -48,7 +47,7 @@ export default function LeasePage({ params }: { params: Promise<{ id: string }> 
       <p className="small"><Link href="/">All leases</Link></p>
       <div className="page-head" style={{ marginTop: "0.5rem" }}>
         <div>
-          <h1>{r.tract_id}, {r.lessor}</h1>
+          <h1>{leaseName(r)}</h1>
           <p className="muted">{r.county} County, {fmtNumber(r.gross_acres, 2)} gross acres. Document {r.document_id}.</p>
         </div>
         <a className="button" href={api.pdfUrl(r.document_id)} target="_blank" rel="noreferrer">Open lease PDF</a>

@@ -4,8 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   api, FLAG_LABELS, STATUS_LABELS, fmtDate, fmtMonth, fmtNumber, fmtRoyalty,
-  type LeaseRisk, type Severity, type Summary,
-} from "@/lib/api";
+  type LeaseRisk, type Severity, type Summary, leaseName } from "@/lib/api";
 
 const SEVERITY_LABEL: Record<Severity, string> = { high: "Act now", medium: "Watch", low: "Verify data", none: "Clear" };
 
@@ -46,6 +45,7 @@ export default function Dashboard() {
 
   const high = summary.by_severity.high ?? 0;
   const medium = summary.by_severity.medium ?? 0;
+  const unlinked = summary.by_flag.production_not_linked ?? 0;
 
   return (
     <>
@@ -53,8 +53,12 @@ export default function Dashboard() {
         <div>
           <h1>{high} of {summary.leases} leases need action now</h1>
           <p className="muted">
-            {medium} more to watch. {fmtNumber(summary.high_risk_acres)} gross acres at risk. Production through{" "}
-            {fmtMonth(summary.latest_reported_month)} (latest RRC report), checked {fmtDate(summary.as_of_date)}.
+            {medium} more to watch.
+            {summary.high_risk_acres ? ` ${fmtNumber(summary.high_risk_acres)} gross acres at risk.` : ""}
+            {summary.latest_reported_month
+              ? ` Production through ${fmtMonth(summary.latest_reported_month)} (latest RRC report),`
+              : " No RRC production linked yet,"}{" "}
+            checked {fmtDate(summary.as_of_date)}.
           </p>
         </div>
         <Link href="/review" className="button">Review {summary.review_queue} extracted fields</Link>
@@ -71,7 +75,7 @@ export default function Dashboard() {
                 className="tract"
                 data-severity={r.severity}
                 data-unverified={r.fields_needing_review > 0}
-                aria-label={`${r.tract_id}, ${SEVERITY_LABEL[r.severity]}: ${r.recommended_action}`}
+                aria-label={`${r.tract_id ?? r.document_id}, ${SEVERITY_LABEL[r.severity]}: ${r.recommended_action}`}
               >
                 <span className="tract-id">{r.tract_id ?? r.document_id}</span>
                 <span className="lessor">{r.lessor}</span>
@@ -91,7 +95,11 @@ export default function Dashboard() {
         <aside aria-labelledby="act-heading">
           <h2 id="act-heading">What to do next</h2>
           {urgent.length === 0 ? (
-            <p className="muted" style={{ marginTop: "0.5rem" }}>Nothing urgent. Every lease is producing or well inside its primary term.</p>
+            <p className="muted" style={{ marginTop: "0.5rem" }}>
+              {unlinked
+                ? `Nothing urgent that the data can show. ${unlinked} lease${unlinked === 1 ? " isn't" : "s aren't"} linked to RRC production yet, so whether production holds ${unlinked === 1 ? "it" : "them"} is unknown.`
+                : "Nothing urgent. Every lease is producing or well inside its primary term."}
+            </p>
           ) : (
             <ol className="actions" style={{ marginTop: "0.75rem" }}>
               {urgent.map((r) => (
@@ -99,7 +107,7 @@ export default function Dashboard() {
                   <div className="when">
                     {r.next_deadline ? fmtDate(r.next_deadline) : SEVERITY_LABEL[r.severity]}
                   </div>
-                  <Link href={`/leases/${r.document_id}`}>{r.tract_id}, {r.lessor}</Link>
+                  <Link href={`/leases/${r.document_id}`}>{leaseName(r)}</Link>
                   <p className="small">{r.recommended_action}</p>
                 </li>
               ))}

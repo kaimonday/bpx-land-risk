@@ -5,7 +5,7 @@ import json
 import os
 from datetime import date
 
-from .config import DB_PATH, DBT_DIR, REVIEW_THRESHOLD
+from .config import DB_PATH, DBT_DIR, PRODUCTION_LINKED, REVIEW_SKIP_FIELDS, REVIEW_THRESHOLD
 
 
 def run_dbt(command: str = "build", select: str | None = None, as_of: date | None = None) -> bool:
@@ -13,7 +13,9 @@ def run_dbt(command: str = "build", select: str | None = None, as_of: date | Non
 
     os.environ["LANDRISK_DB_ABS"] = str(DB_PATH)
     vars_ = {"review_threshold": REVIEW_THRESHOLD,
-             "as_of_date": (as_of or date.today()).isoformat()}
+             "as_of_date": (as_of or date.today()).isoformat(),
+             "production_linked": PRODUCTION_LINKED,
+             "review_skip_fields": REVIEW_SKIP_FIELDS}
     args = [command, "--project-dir", str(DBT_DIR), "--profiles-dir", str(DBT_DIR),
             "--vars", json.dumps(vars_), "--quiet"]
     if select:

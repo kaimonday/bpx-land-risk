@@ -30,6 +30,13 @@ GROQ_MAX_INPUT_TOKENS = int(os.getenv("GROQ_MAX_INPUT_TOKENS", "4000"))
 REVIEW_THRESHOLD = float(os.getenv("REVIEW_CONFIDENCE_THRESHOLD", "0.85"))
 RRC_OPERATOR_PATTERN = os.getenv("RRC_OPERATOR_PATTERN", "^BPX")
 
+# Per-dataset switches for real documents. A dataset whose leases aren't linked
+# to RRC production sets LANDRISK_PRODUCTION_LINKED=false, so missing
+# production reads as unknown rather than "never produced". Fields named in
+# LANDRISK_REVIEW_SKIP_FIELDS (e.g. tract_id) don't count as awaiting review.
+PRODUCTION_LINKED = os.getenv("LANDRISK_PRODUCTION_LINKED", "true").lower() != "false"
+REVIEW_SKIP_FIELDS = [f for f in os.getenv("LANDRISK_REVIEW_SKIP_FIELDS", "").split(",") if f]
+
 # Lessee printed on the synthetic lease documents. Deliberately fictional:
 # the documents are demo data and must never read as real bpx records.
 SYNTHETIC_LESSEE = os.getenv("SYNTHETIC_LESSEE", "Permian Demo Operating LLC")

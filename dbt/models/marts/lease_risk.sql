@@ -5,6 +5,9 @@
 -- (data lags 2-3 months), not against today, so the reporting lag alone never
 -- raises a flag.
 {%- set as_of = "cast('" ~ var('as_of_date') ~ "' as date)" %}
+{#- A dataset not linked to RRC production can't tell "never produced" from
+    "unknown", so the production rules are switched off for it. #}
+{%- set linked = 'true' if var('production_linked') else 'false' %}
 
 with leases as (
     select * from {{ ref('leases') }}
@@ -75,16 +78,17 @@ base as (
 flagged as (
     select
         *,
-        not in_primary_term and not has_produced as f_expired_undeveloped,
-        in_primary_term and not has_produced
+        {{ linked }} and not in_primary_term and not has_produced as f_expired_undeveloped,
+        {{ linked }} and in_primary_term and not has_produced
             and days_to_term_end <= {{ var('expiring_window_days') }} as f_expiring_undeveloped,
-        not in_primary_term and has_produced
+        {{ linked }} and not in_primary_term and has_produced
             and months_since_production >= {{ var('hbp_gap_months') }} as f_hbp_production_gap,
-        not in_primary_term and shut_in_due_date is not null
+        {{ linked }} and not in_primary_term and shut_in_due_date is not null
             and shut_in_due_date < as_of_date as f_shut_in_overdue,
-        not in_primary_term and shut_in_due_date is not null
+        {{ linked }} and not in_primary_term and shut_in_due_date is not null
             and shut_in_due_date between as_of_date
                 and as_of_date + to_days({{ var('shut_in_warning_days') }}) as f_shut_in_due_soon,
+        not {{ linked }} and not coalesce(in_primary_term, false) as f_production_not_linked,
         fields_needing_review > 0 as f_unverified
     from base
 )
@@ -100,6 +104,7 @@ select
     primary_term_months,
     primary_term_end,
     case when in_primary_term then 'primary_term'
+         when not {{ linked }} then 'production_not_linked'
          when has_produced then 'held_by_production'
          else 'past_primary_term' end as lease_status,
     has_produced,
@@ -122,6 +127,7 @@ select
         case when f_hbp_production_gap then 'hbp_production_gap' end,
         case when f_expiring_undeveloped then 'expiring_undeveloped' end,
         case when f_shut_in_due_soon then 'shut_in_payment_due_soon' end,
+        case when f_production_not_linked then 'production_not_linked' end,
         case when f_unverified then 'unverified_extraction' end
     ], x -> x is not null) as risk_flags,
     case
@@ -129,7 +135,7 @@ select
         when f_hbp_production_gap and (months_since_production >= 6 or not has_shut_in_clause) then 'high'
         when f_expiring_undeveloped and days_to_term_end <= 90 then 'high'
         when f_hbp_production_gap or f_expiring_undeveloped or f_shut_in_due_soon then 'medium'
-        when f_unverified then 'low'
+        when f_unverified or f_production_not_linked then 'low'
         else 'none'
     end as severity,
     case
@@ -137,7 +143,7 @@ select
         when f_hbp_production_gap and (months_since_production >= 6 or not has_shut_in_clause) then 3
         when f_expiring_undeveloped and days_to_term_end <= 90 then 3
         when f_hbp_production_gap or f_expiring_undeveloped or f_shut_in_due_soon then 2
-        when f_unverified then 1
+        when f_unverified or f_production_not_linked then 1
         else 0
     end as severity_rank,
     case
@@ -158,6 +164,9 @@ select
             || strftime(shut_in_due_date, '%b %d, %Y') || '.'
         when f_unverified then
             fields_needing_review || ' extracted field(s) still need review before this record is trusted.'
+        when f_production_not_linked then
+            coalesce('Primary term ended ' || strftime(primary_term_end, '%b %d, %Y') || '. ', 'Primary term end unknown. ')
+            || 'Link this lease to its RRC lease to see whether production holds it.'
         else 'No action needed.'
     end as recommended_action,
     least(
