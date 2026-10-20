@@ -91,6 +91,44 @@ export interface Alternative {
 // Fields left out of label mode, e.g. "tract_id" for real leases, which have no tract IDs.
 export const LABEL_SKIP = process.env.NEXT_PUBLIC_LABEL_SKIP ?? "";
 
+// ---------- linking leases to RRC production ----------
+
+// Only the real-lease app links production; the demo's leases come pre-linked.
+export const LINKING = process.env.NEXT_PUBLIC_LINKING === "1";
+
+export interface LinkLease {
+  document_id: string;
+  lessor: string | null;
+  lessee: string | null;
+  county: string | null;
+  effective_date: string | null;
+  status: "linked" | "no_match" | "open";
+  linked_count: number;
+}
+
+export interface LinkCandidate {
+  key: string; // e.g. O-01-16355
+  lease_name: string | null;
+  operator_name: string | null;
+  county: string | null;
+  first_prod_ym: string | null; // YYYYMM
+  last_prod_ym: string | null;
+  score: number | null;
+  why: string;
+  linked: boolean;
+  linked_to: string[]; // other lease documents already linked to this RRC lease
+  annual_boe: [number, number][];
+}
+
+export interface LinkDetail {
+  lease: Omit<LinkLease, "status" | "linked_count">;
+  land: { text: string | null; abstracts: string[]; surveys: string[]; acres: string | null };
+  candidates: LinkCandidate[];
+  linked: string[];
+  decision: "linked" | "no_match" | "cleared" | null;
+  county_rrc_leases: number;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { cache: "no-store", ...init });
   if (!res.ok) {
@@ -118,6 +156,16 @@ export const api = {
       body: JSON.stringify(body),
     }),
   refresh: () => request<{ ok: boolean }>("/api/refresh", { method: "POST" }),
+  linkLeases: () => request<LinkLease[]>("/api/link/leases"),
+  linkLease: (id: string) => request<LinkDetail>(`/api/link/leases/${encodeURIComponent(id)}`),
+  linkSearch: (q: string, county?: string | null) =>
+    request<LinkCandidate[]>(`/api/link/search?q=${encodeURIComponent(q)}${county ? `&county=${encodeURIComponent(county)}` : ""}`),
+  linkSave: (id: string, body: { rrc_leases: string[]; no_match: boolean }) =>
+    request<{ ok: boolean; linked: string[] }>(`/api/link/leases/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   pdfUrl: (id: string) => `${API_URL}/api/documents/${encodeURIComponent(id)}/pdf`,
 };
 
@@ -180,6 +228,10 @@ export function fmtRoyalty(r: number | null): string {
   const fractions: Record<string, string> = { "0.125": "1/8", "0.1875": "3/16", "0.2": "1/5", "0.25": "1/4" };
   const key = String(Math.round(r * 10000) / 10000);
   return fractions[key] ? `${fractions[key]} (${(r * 100).toFixed(2).replace(/\.?0+$/, "")}%)` : `${(r * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
+}
+
+export function fmtYm(ym: string | null | undefined): string {
+  return ym && ym.length === 6 ? fmtMonth(`${ym.slice(0, 4)}-${ym.slice(4)}-01`) : "";
 }
 
 export function fmtNumber(n: number | null | undefined, digits = 0): string {

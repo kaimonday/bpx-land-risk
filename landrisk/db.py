@@ -61,6 +61,13 @@ create table if not exists raw.lease_reviews (
     corrected_value varchar, reviewer varchar, note varchar, reviewed_at timestamp
 );
 
+-- What a reviewer decided when linking a lease to RRC production: linked,
+-- no_match (nothing on the land produces) or cleared. Links themselves live in
+-- tract_rrc_xref, keyed by document id for real leases.
+create table if not exists raw.rrc_link_decisions (
+    document_id varchar, decision varchar, rrc_leases varchar, reviewer varchar, decided_at timestamp
+);
+
 -- Answer key for synthetic documents, used only by the evaluator.
 create table if not exists raw.lease_ground_truth (
     document_id varchar, field_name varchar, value varchar, evidence varchar,

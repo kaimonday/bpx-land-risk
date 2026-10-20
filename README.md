@@ -104,7 +104,7 @@ They are real documents that name real people, so everything stays under `data/`
 
    # in web/
    NEXT_DIST_DIR=.next-real NEXT_PUBLIC_API_URL=http://localhost:8001 NEXT_PUBLIC_LABEL_SKIP=tract_id \
-     NEXT_PUBLIC_SITE_NOTE="Real leases from SEC EDGAR filings: labeling" npx next dev -p 3001
+     NEXT_PUBLIC_LINKING=1 NEXT_PUBLIC_SITE_NOTE="Real leases from SEC EDGAR filings" npx next dev -p 3001
    ```
    `LANDRISK_PRODUCTION_LINKED=false` tells the risk rules these leases aren't linked to RRC production yet, so the dashboard says production is unknown instead of flagging them as never produced. `LANDRISK_REVIEW_SKIP_FIELDS=tract_id` stops the missing tract IDs counting as fields awaiting review.
 
@@ -115,7 +115,7 @@ They are real documents that name real people, so everything stays under `data/`
    python cli.py --db data/real/edgar.duckdb evaluate
    ```
 
-6. Link production. Recorded leases and RRC leases share no key, so this is a suggest-and-confirm step. Load every RRC lease with wells in the leases' counties (production from 1993), then score candidates for each lease on the RRC lease name against the lessor, the operator against the lessee, and production timing against the effective date:
+6. Link production. Recorded leases and RRC leases share no key, so this is a suggest-and-confirm step. The easiest way is the **Link production** screen (start the web app with `NEXT_PUBLIC_LINKING=1`): each lease's PDF and land description beside its candidate RRC leases with production charts, a search for ones the shortlist missed, and This one / No match buttons that save as you go. Many leases on land that already produced name the RRC lease in the land description ("The F. C. Hinds oil and gas lease") or cite its number; those rank first. The CSV route below does the same in bulk. Load every RRC lease with wells in the leases' counties (production from 1993), then score candidates for each lease on the RRC lease name against the lessor, the operator against the lessee, and production timing against the effective date:
    ```bash
    python cli.py --db data/real/edgar.duckdb ingest-rrc --zip path/to/PDQ_DSV.zip --county Milam --county Caldwell ...
    python cli.py --db data/real/edgar.duckdb link-rrc
