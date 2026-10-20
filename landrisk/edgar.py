@@ -254,7 +254,7 @@ def labels_from_reviews(extracted, reviews, field_names, skip):
     extracted: (document_id, field_name, extracted_value) from the latest run.
     reviews: (document_id, field_name, action, corrected_value, reviewed_at).
     Returns ({document_id: {field: value}} for fully labeled documents,
-             {document_id: (labeled, total)}). Accept keeps the extracted value,
+             {document_id: (labeled, total)}). Accept keeps the value accepted,
     correct uses the corrected one (None means "not in the lease").
     """
     latest = {}
@@ -269,7 +269,9 @@ def labels_from_reviews(extracted, reviews, field_names, skip):
         for f in fields:
             if (doc, f) in latest:
                 action, value, _ = latest[(doc, f)]
-                labeled[f] = value if action == "correct" else values[(doc, f)]
+                # Accept stores the value the reviewer saw, so a later re-extraction
+                # can't change what they accepted. Older accepts stored nothing.
+                labeled[f] = value if action == "correct" or value is not None else values[(doc, f)]
         progress[doc] = (len(labeled), len(fields))
         if fields and len(labeled) == len(fields):
             done[doc] = labeled

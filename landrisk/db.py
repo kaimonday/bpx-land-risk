@@ -47,8 +47,11 @@ create table if not exists raw.lease_documents (
 create table if not exists raw.lease_extraction_fields (
     extraction_id varchar, document_id varchar, provider varchar, model varchar,
     field_name varchar, value varchar, llm_confidence double, confidence double,
-    evidence varchar, validation_notes varchar, extracted_at timestamp
+    evidence varchar, validation_notes varchar, extracted_at timestamp,
+    alternatives varchar  -- JSON list of conflicting readings: value, evidence, confidence, part
 );
+-- Databases created before the column existed.
+alter table raw.lease_extraction_fields add column if not exists alternatives varchar;
 
 -- Human decisions from the review queue.
 create table if not exists raw.lease_reviews (
