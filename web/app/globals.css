@@ -137,6 +137,12 @@ button.primary { background: var(--ink); color: var(--surface); }
 button:disabled { opacity: 0.5; cursor: progress; }
 button.chip { padding: 0.25rem 0.7rem; font-weight: 500; border-color: var(--rule-strong); }
 button.chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--surface); }
+.mode-toggle { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.mode-toggle a {
+  padding: 0.25rem 0.7rem; font-weight: 500; border: 1.5px solid var(--rule-strong); border-radius: 4px;
+  color: inherit; text-decoration: none;
+}
+.mode-toggle a[aria-current="page"] { border-color: var(--ink); background: var(--ink); color: var(--surface); }
 input[type="text"] {
   font: inherit; padding: 0.4rem 0.6rem; border: 1.5px solid var(--rule-strong); border-radius: 4px; width: 100%; background: var(--surface);
 }

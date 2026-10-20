@@ -35,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("ingest-edgar", help="Collect real executed leases from SEC EDGAR exhibits")
     s.add_argument("--count", type=int, default=20)
 
+    sub.add_parser("export-labels", help="Turn finished label-mode reviews into labels.csv, training.jsonl and the answer key")
+
     s = sub.add_parser("load-labels", help="Load a filled labels.csv as the answer key for evaluate")
     s.add_argument("--file", type=Path, help="Default: data/real/edgar/labels.csv")
 
@@ -79,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "ingest-edgar":
         from landrisk.edgar import ingest
         ingest(count=args.count)
+    elif args.cmd == "export-labels":
+        from landrisk.edgar import export_labels
+        export_labels()
     elif args.cmd == "load-labels":
         from landrisk.edgar import EDGAR_DIR, load_labels
         load_labels(args.file or EDGAR_DIR / "labels.csv")

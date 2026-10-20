@@ -92,13 +92,27 @@ They are real documents that name real people, so everything stays under `data/`
    ```bash
    python cli.py ingest-edgar --count 20
    ```
-3. Fill in `labels.csv` from the PDFs, one row per lease. A blank cell means the lease doesn't state that field, and `-` means don't score it (`tract_id` starts as `-` because real leases describe land by survey and abstract, not tract IDs). Label each row completely before loading it; rows with no labels at all are skipped.
-4. Extract with Groq and score, in a separate database so real leases stay out of the demo dashboard:
+3. Extract with Groq into a separate database, so real leases stay out of the demo dashboard. Leases longer than `GROQ_MAX_INPUT_TOKENS` (default 4000, sized for Groq's free tier) are extracted in parts and merged; parts that disagree go to review.
    ```bash
    python cli.py --db data/real/edgar.duckdb extract --provider groq --pdf-dir data/real/edgar/pdfs
-   python cli.py --db data/real/edgar.duckdb load-labels
+   python cli.py --db data/real/edgar.duckdb build
+   ```
+4. Label them in the browser. Run a second copy of the app against the EDGAR database (the demo keeps running on 3000/8000):
+   ```bash
+   LANDRISK_DB=data/real/edgar.duckdb LANDRISK_PDF_DIR=data/real/edgar/pdfs python cli.py serve --port 8001
+
+   # in web/
+   NEXT_DIST_DIR=.next-real NEXT_PUBLIC_API_URL=http://localhost:8001 NEXT_PUBLIC_LABEL_SKIP=tract_id \
+     NEXT_PUBLIC_SITE_NOTE="Real leases from SEC EDGAR filings: labeling" npx next dev -p 3001
+   ```
+   Open http://localhost:3001/review?mode=label. **Label all fields** shows every field, not only the low-confidence ones, next to the PDF: accept it, correct it, or mark it **Not in lease**. Checking the confident fields too is what makes the labels able to measure auto-accept precision. Labels save as you go. `tract_id` is left out because real leases describe land by survey and abstract, not tract IDs.
+5. Export and score. `export-labels` uses only leases with every field labeled, writes `labels.csv` and `training.jsonl` (document text plus correct fields), and loads them as the answer key:
+   ```bash
+   python cli.py --db data/real/edgar.duckdb export-labels
    python cli.py --db data/real/edgar.duckdb evaluate
    ```
+
+You can also fill in `labels.csv` by hand and run `load-labels` instead of steps 4 and 5: a blank cell means the lease doesn't state the field and `-` means don't score it.
 
 ## Commands
 
@@ -110,7 +124,8 @@ They are real documents that name real people, so everything stays under `data/`
 | `python cli.py generate` | Generate synthetic lease PDFs and their answer key |
 | `python cli.py extract --provider groq` | Extract fields (`--provider mock` works offline) |
 | `python cli.py ingest-edgar` | Collect real executed leases from SEC EDGAR exhibits |
-| `python cli.py load-labels` | Load a filled `labels.csv` as the answer key |
+| `python cli.py export-labels` | Turn label-mode reviews into `labels.csv`, `training.jsonl` and the answer key |
+| `python cli.py load-labels` | Load a hand-filled `labels.csv` as the answer key |
 | `python cli.py evaluate` | Score extraction against the answer key |
 | `python cli.py --db PATH ...` | Run any command against another DuckDB file |
 | `python cli.py build` | Run dbt models and tests |

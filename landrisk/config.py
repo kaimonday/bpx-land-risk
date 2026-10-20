@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 DATA_DIR = ROOT / "data"
-LEASE_PDF_DIR = DATA_DIR / "leases"
+LEASE_PDF_DIR = DATA_DIR / "leases"  # overridden by LANDRISK_PDF_DIR below
 SAMPLE_PDQ_DIR = DATA_DIR / "sample_pdq"
 DBT_DIR = ROOT / "dbt"
 
@@ -21,6 +21,7 @@ def _path(value: str) -> Path:
 
 
 DB_PATH = _path(os.getenv("LANDRISK_DB", "data/landrisk.duckdb"))
+LEASE_PDF_DIR = _path(os.getenv("LANDRISK_PDF_DIR", str(LEASE_PDF_DIR)))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 # Longer documents are split into parts of about this many tokens. The default

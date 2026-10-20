@@ -14,7 +14,9 @@ export default function Nav() {
         <Link href="/" aria-current={current("/")}>Leases</Link>
         <Link href="/review" aria-current={current("/review")}>Review queue</Link>
       </nav>
-      <span className="freshness small muted">Synthetic lease documents on public Texas RRC production data</span>
+      <span className="freshness small muted">
+        {process.env.NEXT_PUBLIC_SITE_NOTE ?? "Synthetic lease documents on public Texas RRC production data"}
+      </span>
     </header>
   );
 }
