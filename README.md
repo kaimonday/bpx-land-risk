@@ -81,6 +81,25 @@ DuckDB allows one writer at a time, so stop `serve` before re-running `demo`, `b
 
 `evaluate` prints per-field accuracy plus the two numbers that matter: **auto-accept precision** (how often fields that skipped review were right) and **review load** (the share of fields a person still checks).
 
+## Real leases from SEC EDGAR
+
+The synthetic leases have a perfect answer key but read like what the generator was written to produce. To test extraction on real documents, `ingest-edgar` collects signed oil and gas leases that small operators attached to SEC filings. They are mostly Texas Producers 88 forms; the command searches EDGAR full text, rejects blank forms, bundles, duplicates and documents that only mention a lease, and writes each lease as a PDF.
+
+They are real documents that name real people, so everything stays under `data/` (gitignored). They also come with no answer key, so you label them yourself.
+
+1. Add `SEC_USER_AGENT="Your Name you@example.com"` to `.env`. SEC requires a name and contact email on every request; the command stays at five requests a second, half of SEC's limit.
+2. Collect 20 leases and write `data/real/edgar/pdfs/`, `manifest.csv` (source filing for each) and a blank `labels.csv`:
+   ```bash
+   python cli.py ingest-edgar --count 20
+   ```
+3. Fill in `labels.csv` from the PDFs, one row per lease. A blank cell means the lease doesn't state that field, and `-` means don't score it (`tract_id` starts as `-` because real leases describe land by survey and abstract, not tract IDs). Label each row completely before loading it; rows with no labels at all are skipped.
+4. Extract with Groq and score, in a separate database so real leases stay out of the demo dashboard:
+   ```bash
+   python cli.py --db data/real/edgar.duckdb extract --provider groq --pdf-dir data/real/edgar/pdfs
+   python cli.py --db data/real/edgar.duckdb load-labels
+   python cli.py --db data/real/edgar.duckdb evaluate
+   ```
+
 ## Commands
 
 | Command | What it does |
@@ -90,7 +109,10 @@ DuckDB allows one writer at a time, so stop `serve` before re-running `demo`, `b
 | `python cli.py ingest-rrc --zip ...` | Load the real PDQ dump, filtered to one operator |
 | `python cli.py generate` | Generate synthetic lease PDFs and their answer key |
 | `python cli.py extract --provider groq` | Extract fields (`--provider mock` works offline) |
+| `python cli.py ingest-edgar` | Collect real executed leases from SEC EDGAR exhibits |
+| `python cli.py load-labels` | Load a filled `labels.csv` as the answer key |
 | `python cli.py evaluate` | Score extraction against the answer key |
+| `python cli.py --db PATH ...` | Run any command against another DuckDB file |
 | `python cli.py build` | Run dbt models and tests |
 | `python cli.py serve` | Start the API |
 

@@ -228,13 +228,14 @@ def validate(raw: dict, text: str) -> list[dict]:
 
 # ---------- runner ----------
 
-def extract_all(provider: str = "groq", only: list[str] | None = None) -> int:
+def extract_all(provider: str = "groq", only: list[str] | None = None, pdf_dir: Path | None = None) -> int:
     init_raw()
-    pdfs = sorted(LEASE_PDF_DIR.glob("*.pdf"))
+    pdf_dir = pdf_dir or LEASE_PDF_DIR
+    pdfs = sorted(pdf_dir.glob("*.pdf"))
     if only:
         pdfs = [p for p in pdfs if p.stem in only]
     if not pdfs:
-        raise SystemExit(f"No PDFs in {LEASE_PDF_DIR}. Run `python cli.py generate` first.")
+        raise SystemExit(f"No PDFs in {pdf_dir}. Run `python cli.py generate` first.")
 
     model = GROQ_MODEL if provider == "groq" else "mock"
     done = 0

@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="cli.py", description="bpx land risk pipeline")
+    p.add_argument("--db", help="DuckDB file to use instead of LANDRISK_DB, e.g. data/real/edgar.duckdb")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("demo", help="Offline end-to-end run: sample RRC data, synthetic leases, mock extraction, dbt build")
@@ -28,6 +30,13 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("extract", help="Extract lease fields from the PDFs")
     s.add_argument("--provider", choices=["groq", "mock"], default="groq")
     s.add_argument("--only", nargs="*", help="Document ids, e.g. LSE-0003")
+    s.add_argument("--pdf-dir", type=Path, help="Folder of PDFs (default: data/leases)")
+
+    s = sub.add_parser("ingest-edgar", help="Collect real executed leases from SEC EDGAR exhibits")
+    s.add_argument("--count", type=int, default=20)
+
+    s = sub.add_parser("load-labels", help="Load a filled labels.csv as the answer key for evaluate")
+    s.add_argument("--file", type=Path, help="Default: data/real/edgar/labels.csv")
 
     sub.add_parser("evaluate", help="Score extractions against the synthetic answer key")
     sub.add_parser("build", help="Run dbt build (models + tests)")
@@ -36,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=8000)
 
     args = p.parse_args(argv)
+    if args.db:  # before any landrisk import, which reads it at import time
+        os.environ["LANDRISK_DB"] = args.db
 
     if args.cmd == "demo":
         from landrisk import sample_rrc
@@ -64,7 +75,13 @@ def main(argv: list[str] | None = None) -> int:
         generate(count=args.count, seed=args.seed)
     elif args.cmd == "extract":
         from landrisk.extract import extract_all
-        extract_all(provider=args.provider, only=args.only)
+        extract_all(provider=args.provider, only=args.only, pdf_dir=args.pdf_dir)
+    elif args.cmd == "ingest-edgar":
+        from landrisk.edgar import ingest
+        ingest(count=args.count)
+    elif args.cmd == "load-labels":
+        from landrisk.edgar import EDGAR_DIR, load_labels
+        load_labels(args.file or EDGAR_DIR / "labels.csv")
     elif args.cmd == "evaluate":
         from landrisk.evaluate import evaluate
         evaluate()
